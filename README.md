@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%2010%E2%80%9311-blue" alt="Platform">
   <img src="https://img.shields.io/badge/tools-12-blue" alt="12 tools">
-  <img src="https://img.shields.io/badge/tests-701%20passing-brightgreen" alt="701 tests passing">
+  <img src="https://img.shields.io/badge/tests-712%20passing-brightgreen" alt="712 tests passing">
 
   <p><b>A coding-agent fork of <a href="https://github.com/CursorTouch/Windows-MCP">CursorTouch/Windows-MCP</a> v0.8.5</b></p>
 
@@ -40,7 +40,7 @@ repository keeps the MIT license and tracks upstream as a remote.
 | Shell | unbounded timeout, raw CLIXML stderr | 55 s clamp + graceful stop, decoded stderr, persistent sessions |
 | Web | `Scrape` (one URL, via MCP sampling most clients don't implement) | `SearchPro`: metasearch + article extraction + CSS scraping + headless crawl |
 | GUI automation | 11 tools | removed on purpose |
-| Tests | 676 | **701** |
+| Tests | 676 | **712** |
 
 ### Fixes made on top of upstream
 
@@ -80,59 +80,99 @@ being passed off as content. Full documentation:
 
 ### Supported Operating Systems
 
-- Windows 7
-- Windows 8, 8.1
 - Windows 10
-- Windows 11  
+- Windows 11
 
-## 🎥 Demos
+Upstream also lists Windows 7 and 8.1; this fork requires Python 3.14, which
+does not support them.
 
-<https://github.com/user-attachments/assets/d0e7ed1d-6189-4de6-838a-5ef8e1cad54e>
+## 🎥 What a session looks like
 
-<https://github.com/user-attachments/assets/d2b372dc-8d00-4d71-9677-4c64f5987485>
+There are no demo videos here, because there is nothing to film: the fork does
+not click, type, or take screenshots. A typical loop is text in, text out.
+
+```text
+Grep  mode=outline  path=src/windows_mcp/websearch/search_service.py
+Edit  mode=apply    edits=[{file: ..., mode: replace, old: ..., new: ...}]
+Job   mode=start    command="uv run pytest -q"  name=tests
+Job   mode=logs     job_id=...  tail=40  pattern="FAILED|Error"
+```
+
+Research works the same way, cheapest step first:
+
+```text
+SearchPro mode=search  query="crawl4ai wait_for selector"  backend=yandex
+SearchPro mode=read    url=https://docs.crawl4ai.com/...   max_chars=8000
+SearchPro mode=crawl   url=https://example.com/spa  wait_for="css:.results"
+```
 
 ## ✨ Key Features
 
-- **Seamless Windows Integration**  
-  Interacts natively with Windows UI elements, opens apps, controls windows, simulates user input, and more.
+- **Built for coding agents**
+  Twelve tools: a hardened shell with persistent sessions, surgical file edits,
+  code search, a background job runner, and web research. No pixel pushing.
 
-- **Use Any LLM (Vision Optional)**
-   Unlike many automation tools, Windows-MCP doesn't rely on any traditional computer vision techniques or specific fine-tuned models; it works with any LLMs, reducing complexity and setup time.
+- **Context treated as a budget**
+  Tool schemas are re-sent on every single request, so the tool list is kept
+  deliberately small. `Grep` caps its own output, `SearchPro` trims page text,
+  and both say so instead of silently flooding the window.
 
-- **Rich Toolset for UI Automation**  
-  Includes tools for basic keyboard, mouse operation and capturing window/UI state.
+- **Timeouts that match reality**
+  MCP clients abort a call at ~60 s, so blocking tools clamp to 55 s and point
+  at `Job` for anything longer. A slow build no longer throws away the answer.
 
-- **Lightweight & Open-Source**  
-  Minimal dependencies and easy setup with full source code available under MIT license.
+- **Edits you can verify**
+  `Edit` offers replace / regex / line-range / patch modes with optional
+  `expected_sha256` guards, dry runs, and automatic backups.
 
-- **Customizable & Extendable**  
-  Easily adapt or extend tools to suit your unique automation or AI integration needs.
+- **Web research without an API key**
+  `SearchPro` metasearches Brave, Yandex, DuckDuckGo, Bing and Yahoo through
+  `ddgs`, extracts articles with trafilatura, scrapes CSS selectors with
+  Scrapling, and drives a headless browser with Crawl4AI - all out of process,
+  so those dependencies can never break the server.
 
-- **Real-Time Interaction**  
-  Typical latency between actions (e.g., from one mouse click to the next) ranges from **0.2 to 0.5 secs**, and may slightly vary based on the number of active applications and system load, also the inferencing speed of the llm.
-
-- **DOM Mode for Browser Automation**  
-  Special `use_dom=True` mode for State-Tool that focuses exclusively on web page content, filtering out browser UI elements for cleaner, more efficient web automation. Supports Chrome, Edge, and Firefox (Firefox uses an IAccessible2 fallback since it doesn't expose `RootWebArea` via UIA).
+- **Tested**
+  The whole suite runs without a network connection or a live desktop.
 
 ## 🛠️Installation
 
-**Note:** When you install this MCP server for the first time it may take a minute or two because of installing the dependencies in `pyproject.toml`. In the first run the server may timeout ignore it and restart it.
+> **This fork is not on PyPI.** `uvx windows-mcp` installs *upstream*
+> Windows-MCP, not this repository. Install from git.
 
 ### Prerequisites
 
-- Python 3.13+
-- UV (Package Manager) from Astra, install with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- `English` as the default language in Windows preferred else disable the `App-Tool` in the MCP Server for Windows with other languages.
-
-### Run at Login
-
-Run the server directly when needed:
+- Python 3.14+ (`requires-python = ">=3.14"`; with uv: `uv python install 3.14`)
+- [uv](https://docs.astral.sh/uv/) - `pip install uv`
+- Windows 10 or 11
+- Optional, for `SearchPro`: a second interpreter (3.11-3.13 works well) with the
+  search stack installed. It is deliberately *not* a server dependency, so a
+  browser-automation package can never break the MCP server:
 
 ```shell
-uvx windows-mcp serve
-uvx windows-mcp serve --transport sse --host localhost --port 8000
-uvx windows-mcp serve --transport streamable-http --host localhost --port 8000
+pip install ddgs trafilatura "scrapling[fetchers]" crawl4ai
+python -m playwright install chromium   # only needed for mode=crawl
 ```
+
+Run `SearchPro mode=env` afterwards - it prints the interpreter it picked, the
+versions it found, and a live probe.
+
+### Install from git
+
+```shell
+uv tool install git+https://github.com/Loki-Skylineop/Windows-MCP-Pro
+windows-mcp serve
+```
+
+Or from a clone, which is what you want if you plan to change anything:
+
+```shell
+git clone https://github.com/Loki-Skylineop/Windows-MCP-Pro
+cd Windows-MCP-Pro
+uv sync
+uv run python -m windows_mcp serve
+```
+
+### Run at Login
 
 Install it as a background task that starts now and at every login:
 
@@ -464,18 +504,22 @@ npm install -g @anthropic-ai/claude-code
 
 ---
 
-## 🖥️ Running Windows-MCP
+## 🖥️ Running the server
 
-Windows-MCP runs directly on your Windows machine and exposes its tools to the connected MCP client.
+The server runs on your Windows machine and exposes its 12 tools to the
+connected MCP client.
 
 ```shell
-# Runs with stdio transport (default)
-uvx windows-mcp serve
+# stdio transport (default)
+windows-mcp serve
 
-# Or with SSE/Streamable HTTP for network access
-uvx windows-mcp serve --transport sse --host localhost --port 8000
-uvx windows-mcp serve --transport streamable-http --host localhost --port 8000
+# Or SSE / Streamable HTTP for network access
+windows-mcp serve --transport sse --host localhost --port 8000
+windows-mcp serve --transport streamable-http --host localhost --port 8000
 ```
+
+From a clone without installing the entry point, use
+`uv run python -m windows_mcp serve` with the same flags.
 
 Optional environment variables can be set to customize behavior — see [Environment Variables](#-environment-variables) below.
 
@@ -532,7 +576,7 @@ Only the listed origins receive `Access-Control-Allow-Origin` headers; all other
 All tools are enabled by default. Use `--tools` to whitelist specific tools, or `--exclude-tools` to block specific ones.
 
 ```shell
-windows-mcp serve --tools "Screenshot,Click,Snapshot"   # Enable only these tools
+windows-mcp serve --tools "PowerShell,Edit,Grep,Job"   # Enable only these tools
 windows-mcp serve --exclude-tools "PowerShell,Registry" # Disable specific tools
 ```
 
@@ -662,7 +706,12 @@ windows-mcp auth --transport streamable-http --host 0.0.0.0 --port 8000 --with-t
 This command writes the auth key into the config file, can generate `cert.pem` and `key.pem`, and prints an example MCP client configuration for the selected transport.
 
 ### SSRF Protection
-`Scrape` tool blocks: private IPs, loopback, link-local, credentials-in-URLs, non-HTTP schemes.
+
+`SearchPro` validates every fetch target before the worker process is spawned:
+non-HTTP(S) schemes, URLs with embedded credentials, and hosts resolving to
+private, loopback, link-local, multicast or reserved addresses are refused. Set
+`WINDOWS_MCP_SEARCH_ALLOW_PRIVATE=1` when you deliberately want to scrape a
+local dev server.
 
 ---
 
@@ -670,14 +719,13 @@ This command writes the auth key into the config file, can generate `cert.pem` a
 
 All variables are optional unless noted. Set them via the `env` key in `claude_desktop_config.json` (or your MCP client's equivalent config).
 
-### Screenshot & Snapshot
+### Web search (SearchPro)
 
 | Variable | Default | Description |
 |---|---|---|
-| `WINDOWS_MCP_SCREENSHOT_SCALE` | `1.0` | Scale factor applied to screenshots before encoding. Accepts a float in the range `0.1`–`1.0`. Useful on high-resolution displays (1440p, 4K) where the default produces images that exceed Claude Desktop's 1 MB tool-result limit. Set to `0.5` to halve both dimensions (quarter the file size). |
-| `WINDOWS_MCP_SCREENSHOT_BACKEND` | `auto` | Screenshot capture backend. Accepted values: `auto` (tries dxcam → mss → pillow in order), `dxcam`, `mss`, `pillow`. Use `mss` or `pillow` if `dxcam` is unavailable or causes issues on your GPU. |
-| `WINDOWS_MCP_PROFILE_SNAPSHOT` | _(disabled)_ | Set to `1`, `true`, `yes`, or `on` to emit per-stage timing logs for Screenshot/Snapshot calls. Useful for diagnosing slow captures. |
-| `WINDOWS_MCP_DISABLE_FLASH` | _(disabled)_ | Set to `1`, `true`, `yes`, or `on` to suppress the orange-red glowing border that briefly highlights the captured area after every screenshot. The flash is rendered on a transparent always-on-top window *after* capture so it never appears in the captured image. |
+| `WINDOWS_MCP_SEARCH_PYTHON` | _(auto-discovered)_ | Full path to the interpreter that holds the search stack (`ddgs`, `trafilatura`, `scrapling`, `crawl4ai`). Set it when discovery picks the wrong Python - `SearchPro mode=env` prints every candidate it tried and why it was rejected. |
+| `WINDOWS_MCP_SEARCH_ALLOW_PRIVATE` | _(disabled)_ | Set to `1`, `true`, `yes`, or `on` to let `read`/`select`/`crawl` reach private, loopback and link-local addresses. Off by default so a prompt-injected agent cannot read `http://127.0.0.1` or a cloud metadata endpoint through the server. |
+| `WINDOWS_MCP_CLIENT_TIMEOUT` | `55` | Shared ceiling in seconds for `PowerShell` and `SearchPro` timeouts, matching the ~60 s at which MCP clients abort a call. `0` disables the clamp. |
 
 ### Security
 
@@ -686,15 +734,13 @@ All variables are optional unless noted. Set them via the `env` key in `claude_d
 | `WINDOWS_MCP_AUTH_KEY` | _(none)_ | Bearer token required on all HTTP requests. Alternative to `--auth-key` CLI flag. |
 | `WINDOWS_MCP_IP_ALLOWLIST` | _(none)_ | Comma-separated list of allowed client IPs or CIDR ranges (e.g., `203.0.113.0/24,198.51.100.5`). Alternative to `--ip-allowlist` CLI flag. |
 | `WINDOWS_MCP_CORS_ORIGINS` | _(none)_ | Comma-separated list of origins permitted to make cross-origin browser requests (e.g., `https://my-client.example.com`). No CORS headers are emitted when unset. Alternative to `--cors-origins` CLI flag. |
-| `WINDOWS_MCP_TOOLS` | _(all enabled)_ | Comma-separated explicit list of tools to enable (e.g., `Screenshot,Click,Snapshot`). Alternative to `--tools` CLI flag. |
+| `WINDOWS_MCP_TOOLS` | _(all enabled)_ | Comma-separated explicit list of tools to enable (e.g., `PowerShell,Edit,Grep,Job`). Alternative to `--tools` CLI flag. |
 | `WINDOWS_MCP_EXCLUDE_TOOLS` | _(none)_ | Comma-separated list of tools to disable (e.g., `PowerShell,Registry`). Alternative to `--exclude-tools` CLI flag. |
 | `WINDOWS_MCP_SSL_CERTFILE` | _(none)_ | Path to TLS certificate file (.pem) for HTTPS. Must be provided with `WINDOWS_MCP_SSL_KEYFILE`. |
 | `WINDOWS_MCP_SSL_KEYFILE` | _(none)_ | Path to TLS private key file (.pem) for HTTPS. Must be provided with `WINDOWS_MCP_SSL_CERTFILE`. |
 | `WINDOWS_MCP_OAUTH_CLIENT_ID` | _(none)_ | OAuth client ID for HTTP transports. Must be provided with `WINDOWS_MCP_OAUTH_CLIENT_SECRET`. |
 | `WINDOWS_MCP_OAUTH_CLIENT_SECRET` | _(none)_ | OAuth client secret for HTTP transports. Must be provided with `WINDOWS_MCP_OAUTH_CLIENT_ID`. |
 | `WINDOWS_MCP_STATELESS_HTTP` | `false` | Set to `1`, `true`, `yes`, or `on` to run `streamable-http` without `Mcp-Session-Id` connection state. Useful for reconnects after restarts and for horizontally scaled deployments. |
-
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/cursortouch-windows-mcp-badge.png)](https://mseep.ai/app/cursortouch-windows-mcp)
 
 ### Telemetry
 
@@ -722,10 +768,12 @@ Local (no security):
 ```json
 {
   "mcpServers": {
-    "windows-mcp": {
-      "command": "uvx",
-      "args": ["windows-mcp", "serve"],
-      "env": { "WINDOWS_MCP_SCREENSHOT_SCALE": "0.5" }
+    "windows-mcp-pro": {
+      "command": "windows-mcp",
+      "args": ["serve"],
+      "env": {
+        "WINDOWS_MCP_SEARCH_PYTHON": "C:/Users/you/AppData/Local/Programs/Python/Python312/python.exe"
+      }
     }
   }
 }
@@ -735,9 +783,9 @@ Remote (with auth + IP allowlist + TLS):
 ```json
 {
   "mcpServers": {
-    "windows-mcp": {
-      "command": "uvx",
-      "args": ["windows-mcp", "serve", "--transport", "sse", "--host", "0.0.0.0"],
+    "windows-mcp-pro": {
+      "command": "windows-mcp",
+      "args": ["serve", "--transport", "sse", "--host", "0.0.0.0"],
       "env": {
         "WINDOWS_MCP_AUTH_KEY": "your_token",
         "WINDOWS_MCP_IP_ALLOWLIST": "203.0.113.0/24",
@@ -811,30 +859,26 @@ deliberately the other half of the problem.
 client.
 
 
-## 🤝 Connect with Us
-Stay updated and join our community:
+## 🔗 Upstream project
 
-- 📢 Follow us on [X](https://x.com/CursorTouch) for the latest news and updates
+This fork is not affiliated with CursorTouch - it just owes them most of the
+code. Upstream's own channels:
 
-- 💬 Join our [Discord Community](https://discord.com/invite/Aue9Yj2VzS)
+- [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) - the original repository
+- [X](https://x.com/CursorTouch) and [Discord](https://discord.com/invite/Aue9Yj2VzS) - upstream community
+- [Upstream contributors](https://github.com/CursorTouch/Windows-MCP/graphs/contributors) - everyone whose work this fork inherits
 
-## Star History
+Pulling upstream changes into a clone of this fork:
 
-[![Star History Chart](https://star-history.dera.page/svg?repos=CursorTouch/Windows-MCP&type=Date)](https://star-history.dera.page/#CursorTouch/Windows-MCP&Date)
-
-## 👥 Contributors
-
-Thanks to all the amazing people who have contributed to Windows-MCP! 🎉
-
-<a href="https://github.com/CursorTouch/Windows-MCP/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=CursorTouch/Windows-MCP" />
-</a>
-
-We appreciate every contribution, whether it's code, documentation, bug reports, or feature suggestions. Want to contribute? Check out our [Contributing Guidelines](CONTRIBUTING)!
+```shell
+git remote add upstream https://github.com/CursorTouch/Windows-MCP
+git fetch upstream
+git merge upstream/main    # expect conflicts in tools/__init__.py and README.md
+```
 
 ## 🔒 Security
 
-**Important**: Windows-MCP operates with full system access and can perform irreversible operations. Please review our comprehensive security guidelines before deployment.
+**Important**: this server operates with full system access - `PowerShell`, `Edit`, `FileSystem` and `Registry` can perform irreversible operations, and `SearchPro` fetches remote content. Review the security guidelines before exposing it beyond localhost.
 
 For detailed security information, including:
 - Tool-specific risk assessments
@@ -846,17 +890,16 @@ Please read our [Security Policy](SECURITY.md).
 
 ## 📊 Telemetry
 
-Windows-MCP collects usage data to help improve the MCP server. No personal information, no tool arguments, no outputs are tracked.
+This fork inherits upstream's anonymous telemetry. No personal information, no tool arguments, no outputs are tracked.
 
 To disable telemetry, set `ANONYMIZED_TELEMETRY` to `false` in your MCP client configuration:
 
 ```json
 {
   "mcpServers": {
-    "windows-mcp": {
-      "command": "uvx",
+    "windows-mcp-pro": {
+      "command": "windows-mcp",
       "args": [
-        "windows-mcp",
         "serve"
       ],
       "env": {
@@ -873,29 +916,61 @@ For detailed information on what data is collected and how it is handled, please
 
 ## 📝 Limitations
 
-- Selecting specific sections of the text in a paragraph, as the MCP is relying on a11y tree. (⌛ Working on it.)
-- `Type-Tool` is meant for typing text, not programming in IDE because of it types program as a whole in a file. (⌛ Working on it.)
-- This MCP server can't be used to play video games 🎮.
+- **No GUI automation.** No clicking, typing, screenshots, or UI-tree
+  inspection. If you need those, run
+  [upstream Windows-MCP](https://github.com/CursorTouch/Windows-MCP) instead -
+  or alongside this one, registered under a different client name.
+- **`SearchPro` needs a second interpreter.** The search stack is not a server
+  dependency; `SearchPro mode=env` reports which interpreter was chosen and
+  what is missing.
+- **Long work must go through `Job`.** MCP clients abort a call at ~60 s, so
+  `PowerShell` and `SearchPro` clamp to 55 s. Builds, test suites and installs
+  belong in `Job mode=start`.
+- **Windows only**, and PowerShell 5.1 CLIXML stderr is unescaped on a
+  best-effort basis rather than fully parsed.
+- **Not on PyPI.** Install from git; `uvx windows-mcp` fetches upstream.
 
 ## 🪪 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT, unchanged from upstream - see [LICENSE](LICENSE). Upstream copyright stays
+with CursorTouch; the changes in this fork ship under the same license.
 
 ## 🙏 Acknowledgements
 
-Windows-MCP makes use of several excellent open-source projects that power its Windows automation features:
+This fork exists because of
+[CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) - the
+server, transports, security layer and Windows plumbing are theirs.
 
-- [UIAutomation](https://github.com/yinkaisheng/Python-UIAutomation-for-Windows)
+It also stands on:
 
-Huge thanks to the maintainers and contributors of these libraries for their outstanding work and open-source spirit.
+- [FastMCP](https://github.com/jlowin/fastmcp) - the MCP server framework
+- [UIAutomation](https://github.com/yinkaisheng/Python-UIAutomation-for-Windows) - Windows accessibility access, still used by `App`
+- [ddgs](https://github.com/deedy5/ddgs) - metasearch across Brave, Yandex, DuckDuckGo, Bing and Yahoo
+- [trafilatura](https://github.com/adbar/trafilatura) - article extraction
+- [Scrapling](https://github.com/D4Vinci/Scrapling) - CSS/XPath scraping
+- [Crawl4AI](https://github.com/unclecode/crawl4ai) - headless-browser crawling
 
 ## 🤝Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING](CONTRIBUTING) for setup instructions and development guidelines.
+Issues and pull requests for the fork go to
+[Windows-MCP-Pro/issues](https://github.com/Loki-Skylineop/Windows-MCP-Pro/issues).
+Anything that also fixes upstream behaviour is better sent upstream first.
 
-Made with ❤️ by [CursorTouch](https://github.com/CursorTouch)
+```shell
+git clone https://github.com/Loki-Skylineop/Windows-MCP-Pro
+cd Windows-MCP-Pro
+uv sync
+uv run pytest -q      # the full suite; no network, no live desktop
+```
+
+Two house rules: tests stay hermetic, and every new tool has to justify its
+schema against the context budget.
+
+Forked from [CursorTouch](https://github.com/CursorTouch)'s Windows-MCP.
 
 ## Citation
+
+Most of this codebase is upstream's work - cite that:
 
 ```bibtex
 @software{
@@ -906,3 +981,5 @@ Made with ❤️ by [CursorTouch](https://github.com/CursorTouch)
   url={https://github.com/CursorTouch/Windows-MCP}
 }
 ```
+
+For this fork specifically, link <https://github.com/Loki-Skylineop/Windows-MCP-Pro>.
