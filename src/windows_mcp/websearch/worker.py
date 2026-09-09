@@ -43,6 +43,17 @@ SENTINEL = "__WMP_JSON__"
 # through ddgs and are deliberately not retried).
 DEFAULT_BACKENDS = ("auto", "brave", "yandex", "duckduckgo", "bing", "yahoo")
 
+# ddgs 9.x still exposes .books(), but every backend answers "No results found"
+# (measured 2026-09), so mode=books talks to Open Library instead: a free JSON
+# API with no key, no quota and a documented schema.
+OPENLIBRARY_SEARCH = "https://openlibrary.org/search.json"
+OPENLIBRARY_FIELDS = "key,title,author_name,first_publish_year,edition_count,language,subject"
+
+HTTP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
 # A short page containing one of these is a block page, not an answer.
 BLOCK_MARKERS = (
     "captcha",
@@ -198,17 +209,116 @@ def do_videos(payload: dict) -> dict:
     return _search(payload, "videos")
 
 
+def _book_row(doc: dict) -> dict:
+    """Map one Open Library work onto the row shape the formatter expects."""
+    key = str(doc.get("key") or "").strip()
+    authors = ", ".join(str(name) for name in (doc.get("author_name") or [])[:3])
+    subjects = ", ".join(str(item) for item in (doc.get("subject") or [])[:5])
+
+    extra: dict[str, str] = {}
+    if doc.get("first_publish_year"):
+        extra["first_published"] = str(doc["first_publish_year"])
+    if doc.get("edition_count"):
+        extra["editions"] = str(doc["edition_count"])
+    languages = doc.get("language") or []
+    if languages:
+        extra["languages"] = ", ".join(str(code) for code in languages[:5])
+
+    pieces = []
+    if authors:
+        pieces.append(f"by {authors}")
+    if subjects:
+        pieces.append(f"subjects: {subjects}")
+
+    return {
+        "title": _clean_ws(doc.get("title")),
+        "url": ("https://openlibrary.org" + key) if key.startswith("/") else key,
+        "snippet": _clean_ws(" - ".join(pieces)),
+        "extra": extra,
+    }
+
+
 def do_books(payload: dict) -> dict:
-    """ddgs also indexes books/publications; parity with ddgs' own MCP server."""
-    return _search(payload, "books")
+    """Search books through Open Library.
+
+    ddgs still advertises a books() method, but every backend it offers answers
+    'No results found' (measured 2026-09), so routing this mode through ddgs
+    produced nothing but a confident failure. Open Library needs no key and
+    returns a documented JSON schema, so the mode now actually answers.
+    """
+    import urllib.parse
+    import urllib.request
+
+    query = (payload.get("query") or "").strip()
+    if not query:
+        raise ValueError("mode=books requires a query")
+
+    limit = max(1, min(int(payload.get("max_results") or 8), 100))
+    budget = int(payload.get("fetch_timeout") or 30)
+    # Two short attempts rather than one long one: openlibrary.org occasionally
+    # hangs the TLS handshake, and a single full-budget attempt turned that
+    # hiccup into a dead mode (measured: 30 s of nothing, then a retry that
+    # answered in 10 s). Half the budget each means a stuck handshake fails over
+    # instead of eating the whole call.
+    attempt = max(5, budget // 2)
+    params = urllib.parse.urlencode({"q": query, "limit": limit, "fields": OPENLIBRARY_FIELDS})
+    request = urllib.request.Request(
+        f"{OPENLIBRARY_SEARCH}?{params}", headers={"User-Agent": HTTP_UA}
+    )
+
+    data = None
+    tried: list[str] = []
+    for _ in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=attempt) as response:
+                data = json.loads(response.read().decode("utf-8", errors="replace"))
+            break
+        except Exception as exc:
+            tried.append(f"openlibrary: {type(exc).__name__}: {exc}")
+
+    if data is None:
+        return {
+            "ok": False,
+            "engine": "openlibrary",
+            "query": query,
+            "results": [],
+            "count": 0,
+            "tried": tried,
+            "error": (
+                "Open Library did not answer - retry in a moment, or use mode=search "
+                "to find book pages on the open web"
+            ),
+        }
+
+    results = [_book_row(doc) for doc in (data.get("docs") or [])][:limit]
+    total = data.get("numFound")
+    return {
+        "engine": "openlibrary",
+        "query": query,
+        "results": results,
+        "count": len(results),
+        "total": int(total) if isinstance(total, int) else len(results),
+        "tried": tried,
+    }
 
 
 def _fetch_html(url: str, timeout: int) -> tuple[str, str]:
-    """Return (engine, html). Tries scrapling first, then plain urllib."""
+    """Return (engine, html). Tries scrapling first, then plain urllib.
+
+    scrapling defaults to three attempts and each one gets the full timeout, so
+    a host that rejects curl_cffi's TLS impersonation used to burn three times
+    the budget and the whole call died on the deadline instead of failing fast.
+    One attempt at half the budget leaves the other half for the urllib
+    fallback, which speaks ordinary OpenSSL and usually just works.
+    """
+    attempt = max(5, timeout // 2)
     try:
         from scrapling.fetchers import Fetcher
 
-        page = Fetcher.get(url, timeout=timeout)
+        try:
+            page = Fetcher.get(url, timeout=attempt, retries=1, retry_delay=0)
+        except TypeError:  # older scrapling without the retry knobs
+            page = Fetcher.get(url, timeout=attempt)
         html = getattr(page, "html_content", None) or getattr(page, "body", None) or str(page)
         if html:
             return "scrapling", str(html)
@@ -217,16 +327,8 @@ def _fetch_html(url: str, timeout: int) -> tuple[str, str]:
 
     import urllib.request
 
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-            )
-        },
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    request = urllib.request.Request(url, headers={"User-Agent": HTTP_UA})
+    with urllib.request.urlopen(request, timeout=max(5, timeout - attempt)) as response:
         raw = response.read()
     return "urllib", raw.decode("utf-8", errors="replace")
 
@@ -339,6 +441,20 @@ def do_read(payload: dict) -> dict:
         "documents": documents,
         "count": len(documents),
     }
+
+
+def _parse_html(html: str):
+    """Parse HTML into a scrapling Selector.
+
+    Kept as its own function so the import stays lazy (the parser is only needed
+    by mode=select) and so tests can swap in a stub instead of requiring the
+    whole scraping stack.
+    """
+    from scrapling import Selector
+
+    return Selector(html)
+
+
 def do_select(payload: dict) -> dict:
     url = (payload.get("url") or "").strip()
     if not url:
@@ -352,15 +468,20 @@ def do_select(payload: dict) -> dict:
     timeout = int(payload.get("fetch_timeout") or 30)
     limit = int(payload.get("max_results") or 20)
 
-    from scrapling.fetchers import Fetcher
-
-    page = Fetcher.get(url, timeout=timeout)
+    # Fetch through the shared ladder (one bounded scrapling attempt, then
+    # urllib) so a single hostile host cannot eat the whole deadline, then parse
+    # whatever HTML came back: Selector understands ::text and ::attr() too.
+    engine, html = _fetch_html(url, timeout)
+    page = _parse_html(html)
     columns: dict[str, list[str]] = {}
     for name, selector in selectors.items():
         try:
             values = page.css(selector)
         except Exception as exc:
-            raise ValueError(f"selector {name!r} ({selector!r}) failed: {exc}") from exc
+            hint = ""
+            if "," in str(selector) and "=" in str(selector):
+                hint = " - separate several selectors with ';', a comma belongs to CSS itself"
+            raise ValueError(f"selector {name!r} ({selector!r}) failed: {exc}{hint}") from exc
         columns[str(name)] = [_clean_ws(value) for value in list(values)[:limit]]
 
     height = max((len(values) for values in columns.values()), default=0)
@@ -369,7 +490,7 @@ def do_select(payload: dict) -> dict:
         for index in range(height)
     ]
     return {
-        "engine": "scrapling",
+        "engine": engine,
         "url": url,
         "rows": rows,
         "count": len(rows),

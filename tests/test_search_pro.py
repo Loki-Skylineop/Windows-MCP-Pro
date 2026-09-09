@@ -11,6 +11,9 @@ network.
 from __future__ import annotations
 
 import json
+import sys
+import types
+import urllib.request
 
 import pytest
 
@@ -112,6 +115,10 @@ class TestSelectorParsing:
     def test_pair_without_equals_is_rejected(self):
         with pytest.raises(ValueError, match="name=css-selector"):
             search_service.parse_selectors("div.result")
+
+    def test_the_error_names_the_real_separator(self):
+        with pytest.raises(ValueError, match="';' or a newline"):
+            search_service.parse_selectors("h1, p")
 
 
 class TestTimeoutClamp:
@@ -614,6 +621,32 @@ class TestBatchRead:
         assert "trimmed" in out
 
 
+class _FakeResponse:
+    """Minimal stand-in for what urlopen returns."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *exc_info) -> bool:
+        return False
+
+
+def _fake_scrapling(monkeypatch, fetcher) -> None:
+    """Install a fake scrapling.fetchers so the real package is not needed."""
+    module = types.ModuleType("scrapling.fetchers")
+    module.Fetcher = fetcher
+    parent = types.ModuleType("scrapling")
+    parent.fetchers = module
+    monkeypatch.setitem(sys.modules, "scrapling", parent)
+    monkeypatch.setitem(sys.modules, "scrapling.fetchers", module)
+
+
 class TestBooksMode:
     def test_books_needs_a_query(self, stub_worker):
         with pytest.raises(ValueError, match="requires query"):
@@ -623,8 +656,8 @@ class TestBooksMode:
         stub_worker.set_reply(
             {
                 "ok": True,
-                "engine": "ddgs:auto",
-                "results": [{"title": "SICP", "url": "https://example.com/sicp"}],
+                "engine": "openlibrary",
+                "results": [{"title": "SICP", "url": "https://openlibrary.org/works/OL1W"}],
             }
         )
 
@@ -633,17 +666,105 @@ class TestBooksMode:
         assert "mode=books" in out
         assert "SICP" in out
 
-    def test_the_worker_maps_books_onto_the_ddgs_index(self, monkeypatch):
-        seen: dict[str, str] = {}
+    def test_the_worker_asks_open_library(self, monkeypatch):
+        captured: dict[str, object] = {}
+        document = {
+            "numFound": 4321,
+            "docs": [
+                {
+                    "key": "/works/OL893414W",
+                    "title": "Dune",
+                    "author_name": ["Frank Herbert"],
+                    "first_publish_year": 1965,
+                    "edition_count": 161,
+                    "language": ["eng", "rus"],
+                    "subject": ["Science fiction"],
+                }
+            ],
+        }
 
-        def fake_search(payload, kind):
-            seen["kind"] = kind
-            return {"results": []}
+        def fake_urlopen(request, timeout=None):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            return _FakeResponse(json.dumps(document).encode("utf-8"))
 
-        monkeypatch.setattr(worker, "_search", fake_search)
-        worker.do_books({"query": "x"})
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-        assert seen["kind"] == "books"
+        reply = worker.do_books({"query": "dune", "max_results": 3, "fetch_timeout": 20})
+
+        assert reply["engine"] == "openlibrary"
+        assert reply["total"] == 4321
+        assert reply["results"][0]["title"] == "Dune"
+        assert reply["results"][0]["url"] == "https://openlibrary.org/works/OL893414W"
+        assert "Frank Herbert" in reply["results"][0]["snippet"]
+        assert reply["results"][0]["extra"]["first_published"] == "1965"
+        assert reply["results"][0]["extra"]["editions"] == "161"
+        assert captured["url"].startswith("https://openlibrary.org/search.json?")
+        assert "limit=3" in captured["url"]
+        # Half the budget per attempt, so a hung handshake can still fail over.
+        assert captured["timeout"] == 10
+
+    def test_books_reports_an_unreachable_open_library(self, monkeypatch):
+        attempts: list = []
+
+        def boom(request, timeout=None):
+            attempts.append(timeout)
+            raise OSError("dns is down")
+
+        monkeypatch.setattr(urllib.request, "urlopen", boom)
+
+        reply = worker.do_books({"query": "dune"})
+
+        assert reply["ok"] is False
+        assert "Open Library" in reply["error"]
+        assert "dns is down" in reply["tried"][0]
+        assert attempts == [15, 15]
+        assert len(reply["tried"]) == 2
+
+    def test_books_survives_a_flaky_handshake(self, monkeypatch):
+        document = {"numFound": 1, "docs": [{"key": "/works/OL1W", "title": "Dune"}]}
+        calls: list = []
+
+        def flaky(request, timeout=None):
+            calls.append(timeout)
+            if len(calls) == 1:
+                raise TimeoutError("handshake timed out")
+            return _FakeResponse(json.dumps(document).encode("utf-8"))
+
+        monkeypatch.setattr(urllib.request, "urlopen", flaky)
+
+        reply = worker.do_books({"query": "dune", "fetch_timeout": 30})
+
+        assert reply["results"][0]["title"] == "Dune"
+        assert calls == [15, 15]
+        assert "handshake timed out" in reply["tried"][0]
+
+    def test_books_needs_a_query_in_the_worker_too(self):
+        with pytest.raises(ValueError, match="requires a query"):
+            worker.do_books({})
+
+    def test_total_matches_are_reported_when_they_exceed_the_page(self, stub_worker):
+        stub_worker.set_reply(
+            {
+                "ok": True,
+                "engine": "openlibrary",
+                "results": [{"title": "Dune"}],
+                "total": 48104,
+            }
+        )
+
+        out = search_service.run(mode="books", query="dune")
+
+        assert "48,104 total matches" in out
+
+    def test_backend_is_reported_as_ignored(self, stub_worker):
+        stub_worker.set_reply(
+            {"ok": True, "engine": "openlibrary", "results": [{"title": "Dune"}]}
+        )
+
+        out = search_service.run(mode="books", query="dune", backend="yandex")
+
+        assert "Open Library" in out
 
     def test_books_is_a_registered_worker_mode(self):
         assert worker.HANDLERS["books"] is worker.do_books
@@ -691,3 +812,124 @@ class TestWorkerBatchRead:
     def test_read_still_requires_a_url(self):
         with pytest.raises(ValueError, match="requires a url"):
             worker.do_read({})
+
+
+class _FakeSelector:
+    """Stands in for scrapling's Selector, which the test venv does not install."""
+
+    def __init__(self, values: dict):
+        self._values = values
+
+    def css(self, selector: str) -> list:
+        if selector not in self._values:
+            raise ValueError(f"Invalid CSS selector {selector!r}")
+        return self._values[selector]
+
+
+class TestWorkerSelect:
+    def test_select_parses_whatever_the_fetch_ladder_returned(self, monkeypatch):
+        seen: dict[str, object] = {}
+
+        def fake_fetch(url, timeout):
+            seen["url"] = url
+            seen["timeout"] = timeout
+            return "urllib", "<html><body><h1>Title</h1><p>One</p><p>Two</p></body></html>"
+
+        monkeypatch.setattr(worker, "_fetch_html", fake_fetch)
+        monkeypatch.setattr(
+            worker,
+            "_parse_html",
+            lambda html: _FakeSelector({"h1::text": ["Title"], "p::text": ["One", "Two"]}),
+        )
+
+        reply = worker.do_select(
+            {
+                "url": "https://example.com",
+                "selectors": {"heading": "h1::text", "body": "p::text"},
+                "fetch_timeout": 30,
+            }
+        )
+
+        assert reply["engine"] == "urllib"
+        assert reply["rows"][0] == {"heading": "Title", "body": "One"}
+        assert reply["rows"][1] == {"heading": "", "body": "Two"}
+        assert seen["url"] == "https://example.com"
+        assert seen["timeout"] == 30
+
+    def test_a_comma_separated_pair_explains_the_real_separator(self, monkeypatch):
+        monkeypatch.setattr(
+            worker, "_fetch_html", lambda url, timeout: ("urllib", "<html></html>")
+        )
+        monkeypatch.setattr(worker, "_parse_html", lambda html: _FakeSelector({}))
+
+        with pytest.raises(ValueError, match="separate several selectors"):
+            worker.do_select(
+                {"url": "https://example.com", "selectors": {"heading": "h1, body=p"}}
+            )
+
+    def test_select_still_requires_a_url_and_selectors(self):
+        with pytest.raises(ValueError, match="requires a url"):
+            worker.do_select({})
+        with pytest.raises(ValueError, match="requires selectors"):
+            worker.do_select({"url": "https://example.com"})
+
+
+class TestFetchLadder:
+    def test_scrapling_gets_one_attempt_at_half_the_budget(self, monkeypatch):
+        calls: list[dict] = []
+
+        class FakeFetcher:
+            @staticmethod
+            def get(url, **kwargs):
+                calls.append(dict(kwargs))
+                return types.SimpleNamespace(html_content="<html>ok</html>")
+
+        _fake_scrapling(monkeypatch, FakeFetcher)
+
+        engine, html = worker._fetch_html("https://example.com", 40)
+
+        assert engine == "scrapling"
+        assert "ok" in html
+        assert calls[0]["timeout"] == 20
+        assert calls[0]["retries"] == 1
+        assert calls[0]["retry_delay"] == 0
+
+    def test_a_hostile_host_falls_back_to_urllib_inside_the_budget(self, monkeypatch):
+        class DeadFetcher:
+            @staticmethod
+            def get(url, **kwargs):
+                raise RuntimeError("BoringSSL SSL_connect: connection closed abruptly")
+
+        _fake_scrapling(monkeypatch, DeadFetcher)
+        seen: dict[str, object] = {}
+
+        def fake_urlopen(request, timeout=None):
+            seen["timeout"] = timeout
+            return _FakeResponse(b"<html>fallback</html>")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        engine, html = worker._fetch_html("https://example.com", 40)
+
+        assert engine == "urllib"
+        assert "fallback" in html
+        assert seen["timeout"] == 20
+
+    def test_an_older_scrapling_without_retry_knobs_still_works(self, monkeypatch):
+        calls: list[dict] = []
+
+        class PickyFetcher:
+            @staticmethod
+            def get(url, **kwargs):
+                calls.append(dict(kwargs))
+                if "retries" in kwargs:
+                    raise TypeError("unexpected keyword argument 'retries'")
+                return types.SimpleNamespace(html_content="<html>legacy</html>")
+
+        _fake_scrapling(monkeypatch, PickyFetcher)
+
+        engine, html = worker._fetch_html("https://example.com", 30)
+
+        assert engine == "scrapling"
+        assert "legacy" in html
+        assert "retries" not in calls[1]

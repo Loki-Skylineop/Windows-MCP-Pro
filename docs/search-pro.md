@@ -66,7 +66,7 @@ pages that plain HTTP clients walk straight through.
 | `search` | `query` | numbered title / URL / snippet list |
 | `news` | `query` | same, with `date` and `source` |
 | `images`, `videos` | `query` | media URLs with dimensions / duration |
-| `books` | `query` | title, author, publisher and URL per hit |
+| `books` | `query` | Open Library works: authors, first published, editions, languages |
 | `read` | `url` | page as markdown, boilerplate stripped; 1-5 URLs per call |
 | `select` | `url`, `selectors` | one row per record, columns you named |
 | `crawl` | `url` | JS-rendered markdown, `http=` status, link counts |
@@ -81,8 +81,8 @@ pages that plain HTTP clients walk straight through.
 | `max_results` | list modes, `select` | 8 | hard cap 50, clamp is reported |
 | `region` | list modes | `wt-wt` | `ru-ru`, `us-en`, ... |
 | `timelimit` | list modes | - | `d`/`w`/`m`/`y`, recent only |
-| `backend` | list modes | auto chain | `auto,brave,yandex,duckduckgo,bing,yahoo` |
-| `selectors` | `select` | - | `name=css` pairs, or a JSON object |
+| `backend` | list modes | auto chain | `auto,brave,yandex,duckduckgo,bing,yahoo`; ignored by `books` |
+| `selectors` | `select` | - | `name=css` pairs separated by `;` or newlines (a comma is part of CSS), or a JSON object |
 | `max_chars` | read/crawl | 6000 | hard cap 120000, trim is reported |
 | `timeout` | all | 40-55 s | clamped to 55 s, see below |
 | `wait_for`, `js`, `scroll`, `delay` | `crawl` | - | CSS selector to await, JS to run, lazy-load scroll, extra settle time |
@@ -97,6 +97,26 @@ Measured on this machine (same query, `region=ru-ru`):
 `google`, `mojeek` and `wikipedia` are dead through ddgs and are never retried.
 The default chain stops at the first backend that returns anything, and reports
 what it skipped (`Backends tried before this: ...`).
+
+### Books come from Open Library, not ddgs
+
+`ddgs` still exposes a `books()` method, but every backend behind it answers
+`No results found` (measured 2026-09), so `mode=books` was a mode that could
+only fail. It now queries [Open Library](https://openlibrary.org/dev/docs/api/search)
+directly - no key, no quota - and returns the work title, up to three authors,
+the first publication year, the edition count, languages and subjects, plus the
+total number of matches when it exceeds the page. `backend` and `timelimit` do
+not apply there and are reported as ignored. To find book *pages* on the open
+web, `mode=search` is still the right tool.
+
+### How select and read fetch
+
+Both share one fetch ladder: a single scrapling attempt with half the timeout
+budget, then plain `urllib` with the other half. scrapling defaults to three
+attempts and gives each one the full timeout, so a host that rejects
+curl_cffi's TLS fingerprint used to burn 3x20 s and die on the deadline instead
+of failing over. The reply says which engine actually delivered the HTML
+(`engine=scrapling` or `engine=urllib`).
 
 ### Caching
 
@@ -123,7 +143,8 @@ whole point of asking.
 They are fetched inside one worker run instead of one subprocess spawn plus one
 model round trip per page, which is the difference between reading the top three
 search hits in ~5 s and in ~20 s. Each page is returned under its own heading and
-shares the `max_chars` budget; if one URL dies it gets its own `failed: ...`
+splits the `max_chars` budget evenly - the header states `budget=N chars per
+page` - so five pages can never blow past the cap; if one URL dies it gets its own `failed: ...`
 line and the others still arrive. The other modes reject a list rather than
 silently reading the first URL.
 
@@ -155,9 +176,12 @@ silently reading the first URL.
 // read the page you found
 {"mode": "read", "url": "https://gofastmcp.com/changelog", "max_chars": 12000}
 
-// pull a table of records
+// pull a table of records (pairs are separated by ';', never by a comma)
 {"mode": "select", "url": "https://news.ycombinator.com/",
  "selectors": "title=span.titleline > a::text; url=span.titleline > a::attr(href)"}
+
+// look up a book
+{"mode": "books", "query": "dune frank herbert", "max_results": 5}
 
 // SPA that renders with JavaScript
 {"mode": "crawl", "url": "https://example.com/app", "wait_for": "css:div.article-body",
@@ -177,6 +201,8 @@ silently reading the first URL.
 | `mode=crawl` fails with a Chromium error | Playwright browser missing | `<python> -m playwright install chromium` |
 | `did not finish within Ns` | slow site or huge page | lower `max_results`, narrow `focus`, or use `Job` |
 | empty `select` output | site changed its CSS classes | check the markup with `mode=read`, fix the selectors |
+| `Invalid CSS selector 'h1, body=p'` | selector pairs joined with a comma | separate the pairs with `;` or a newline |
+| `Open Library did not answer` | openlibrary.org unreachable or throttled | retry, or use `mode=search` for book pages |
 
 The local playbook that this tool encodes - measurements, dead backends,
 per-marketplace parsers - lives at `Утилиты\seach.md`.

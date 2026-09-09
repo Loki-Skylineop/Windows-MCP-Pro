@@ -334,8 +334,10 @@ def parse_selectors(selectors: object) -> dict[str, str]:
             continue
         if "=" not in piece:
             raise ValueError(
-                f"selector {piece!r} must look like name=css-selector, e.g. "
-                "title=span.titleline > a::text"
+                f"selector {piece!r} must look like name=css-selector. Separate several "
+                "selectors with ';' or a newline - a comma belongs to CSS itself and is "
+                "not a separator, e.g. title=span.titleline > a::text; "
+                "url=span.titleline > a::attr(href)"
             )
         name, _, selector = piece.partition("=")
         parsed[name.strip()] = selector.strip()
@@ -361,6 +363,9 @@ def _format_list(reply: dict, mode: str, notes: list[str]) -> str:
         header += f" | query={reply['query']!r}"
     if reply.get("region"):
         header += f" region={reply['region']}"
+    total = reply.get("total")
+    if isinstance(total, int) and total > len(results):
+        header += f" | {total:,} total matches"
 
     lines = [header]
     for index, row in enumerate(results, start=1):
@@ -637,6 +642,11 @@ def run(
         raise ValueError(f"timelimit must be one of {', '.join(TIMELIMITS)}; got {timelimit!r}")
 
     notes: list[str] = []
+
+    if normalised == "books" and (backend or timelimit):
+        notes.append(
+            "Note: mode=books is served by Open Library, so backend and timelimit are ignored."
+        )
 
     limit = int(max_results) if max_results else DEFAULT_MAX_RESULTS
     if limit < 1:

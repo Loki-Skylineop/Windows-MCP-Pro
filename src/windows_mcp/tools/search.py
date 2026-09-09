@@ -22,7 +22,7 @@ _DESCRIPTION = (
     "~1-4s), returns title + url + snippet; "
     "'news' - same but recent news with dates; "
     "'images' / 'videos' - media results; "
-    "'books' - book and publication search; "
+    "'books' - books through Open Library: authors, first published, editions, languages; "
     "'read' - URL to clean markdown without a browser (article text, menus stripped); "
     "pass up to 5 comma-separated URLs to read them all in one call; "
     "'select' - structured extraction with CSS selectors, e.g. "
