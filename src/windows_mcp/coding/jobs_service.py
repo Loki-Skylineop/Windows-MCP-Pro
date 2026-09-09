@@ -1,4 +1,4 @@
-"""Detached background jobs for long-running commands.
+"""Background jobs for long-running commands.
 
 Why this module exists
 ----------------------
@@ -7,7 +7,7 @@ test run, ``npm install`` or ``pip install`` that takes longer than the timeout
 is killed - and the old timeout path threw away everything the command had
 already printed. ``Job`` moves that work out of the request/response cycle:
 
-    Job start   -> spawn a detached PowerShell process, stream to a log file
+    Job start   -> spawn a background PowerShell process, stream to a log file
     Job status  -> alive? exit code? runtime? last log line?
     Job logs    -> tail/head/grep the log while it runs
     Job stop    -> kill the process tree
@@ -263,7 +263,7 @@ def start(
     shell: str | None = None,
     env: dict | None = None,
 ) -> str:
-    """Spawn *command* as a detached job and return its id immediately."""
+    """Spawn *command* as a background job and return its id immediately."""
     if not command or not str(command).strip():
         return "Error: 'command' is required."
 

@@ -22,7 +22,7 @@ _DESCRIPTION = (
     "are both returned, and if the timeout is hit the output captured so far is preserved instead "
     "of being discarded\n\n"
     "For anything genuinely long-running (installs, builds, test suites, watchers) use the 'Job' "
-    "tool, which runs detached and streams to a log file. For editing files use 'Edit', and for "
+    "tool, which runs in the background and streams to a log file. For editing files use 'Edit', and for "
     "searching file contents use 'Grep' — both are far cheaper than shelling out."
 )
 

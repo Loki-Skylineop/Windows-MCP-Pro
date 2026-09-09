@@ -1,4 +1,4 @@
-"""Job tool - detached background commands for builds, installs and test runs."""
+"""Job tool - background commands for builds, installs and test runs."""
 
 import os
 from typing import Literal
@@ -15,7 +15,7 @@ _DESCRIPTION = (
     "npm install, pip install, pytest, test run, compile, watch, long running, timeout. "
     "The PowerShell tool is synchronous, so anything slower than its timeout gets killed - "
     "start it here instead and poll for output.\n\n"
-    "mode='start'  : spawn 'command' detached (optionally in 'cwd', with a friendly 'name'), "
+    "mode='start'  : spawn 'command' in the background (optionally in 'cwd', with a friendly 'name'), "
     "returns a job id immediately. Output is streamed to a UTF-8 log file line by line.\n"
     "mode='status' : state (running / succeeded / failed), real exit code, pid, runtime, log size "
     "and the last output line. Defaults to the most recent job.\n"
