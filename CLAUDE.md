@@ -4,22 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Windows-MCP is a Python MCP (Model Context Protocol) server that bridges AI LLM agents with the Windows OS, enabling direct desktop automation. It exposes 20 tools via FastMCP:
+Windows-MCP Pro is a Python MCP (Model Context Protocol) server aimed at coding agents on Windows: a hardened shell, surgical file editing, code search, background jobs, git and web research. It is a fork of CursorTouch/Windows-MCP v0.8.5 with the eleven GUI automation tools removed. It exposes 13 tools via FastMCP:
 
-| Group | Tools |
+| Category | Tools |
 |---|---|
-| Capture | `Screenshot`, `Snapshot`, `Scrape`, `DisplayInventory` |
-| Input | `Click`, `Type`, `Scroll`, `Move` (also drag-and-drop via `drag=True`), `Shortcut`, `MultiSelect`, `MultiEdit` |
-| Timing | `Wait`, `WaitFor` |
-| System | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification` |
+| `coding` | `PowerShell`, `Edit`, `Grep`, `Job`, `FileSystem`, `Git` |
+| `web` | `SearchPro` |
+| `windows` | `App`, `Process`, `Registry`, `Clipboard`, `Notification` |
+| `util` | `Wait` |
 
-Tool names are defined by the `name=` argument of each `@mcp.tool(...)` in `src/windows_mcp/tools/`; that directory is the source of truth. Note the shell tool is registered as `PowerShell`, not `Shell`. Any subset can be removed at startup with `--disable-tools` (e.g. `--disable-tools PowerShell,Registry`).
+Tool names are defined by the `name=` argument of each `@mcp.tool(...)` in `src/windows_mcp/tools/`; that directory is the source of truth. Note the shell tool is registered as `PowerShell`, not `Shell`. `tools/__init__.py` owns the module list, the category tag each description carries (`[coding]`, `[web]`, `[windows]`, `[util]`) and the wrapper that turns an `Error: ...` payload into a real MCP tool error (`isError: true`). Any subset can be selected at startup with `--tools` / `--exclude-tools` (e.g. `--tools "PowerShell,Edit,Grep,Job,Git"`).
 
 ## Build & Development Commands
 
 ```bash
 uv sync                    # Install dependencies
-uv run windows-mcp         # Run the MCP server
+uv run windows-mcp-pro     # Run the MCP server
 ruff format .              # Format code
 ruff check .               # Lint code
 ruff check --fix .         # Lint and auto-fix
@@ -27,7 +27,7 @@ pytest                     # Run all tests
 pytest tests/test_foo.py   # Run a single test file
 ```
 
-**Package manager**: UV (not pip). **Python**: 3.13+. **Build backend**: Hatchling.
+**Package manager**: uv (not pip). **Python**: 3.14+. **Build backend**: setuptools.
 
 ## Architecture
 

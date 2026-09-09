@@ -3,7 +3,7 @@
     Run the Windows-MCP server directly from this checkout (patched source).
 
 .DESCRIPTION
-    The published server is normally started with `uvx windows-mcp serve ...`,
+    The published server is normally started with `uvx windows-mcp-pro serve ...`,
     which runs the *published* package - none of the local changes in `src/`.
     This script runs the same CLI from this working copy instead, by putting
     `src` first on PYTHONPATH, so the Edit / Grep / Job tools and the patched

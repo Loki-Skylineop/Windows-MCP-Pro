@@ -40,7 +40,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _UV_LOCK_WINDOWS_MCP = re.compile(
-    r'^\[\[package\]\]\nname = "windows-mcp"\nversion = "([^"]+)"',
+    r'^\[\[package\]\]\nname = "windows-mcp-pro"\nversion = "([^"]+)"',
     re.MULTILINE,
 )
 
@@ -63,8 +63,8 @@ def collect_versions(root: Path = REPO_ROOT) -> dict[str, str]:
     lock_text = (root / "uv.lock").read_text(encoding="utf-8")
     match = _UV_LOCK_WINDOWS_MCP.search(lock_text)
     if match is None:
-        raise ValueError("uv.lock has no [[package]] entry for windows-mcp")
-    versions["uv.lock:windows-mcp"] = match.group(1)
+        raise ValueError("uv.lock has no [[package]] entry for windows-mcp-pro")
+    versions["uv.lock:windows-mcp-pro"] = match.group(1)
 
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if "version" not in manifest:

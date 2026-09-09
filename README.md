@@ -137,8 +137,13 @@ SearchPro mode=crawl   url=https://example.com/spa  wait_for="css:.results"
 
 ## 🛠️Installation
 
-> **This fork is not on PyPI.** `uvx windows-mcp` installs *upstream*
-> Windows-MCP, not this repository. Install from git.
+> **This fork is not on PyPI.** The distribution is named `windows-mcp-pro`, but
+> nothing is published under that name yet, and `uvx windows-mcp` fetches
+> *upstream* Windows-MCP instead of this repository. Install from git.
+>
+> The config and data folders keep their original names
+> (`~/.windows-mcp/`, `%LOCALAPPDATA%\windows-mcp\`), so an existing install
+> keeps its jobs, sessions and config after the rename.
 
 ### Prerequisites
 
@@ -161,7 +166,7 @@ versions it found, and a live probe.
 
 ```shell
 uv tool install git+https://github.com/Loki-Skylineop/Windows-MCP-Pro
-windows-mcp serve
+windows-mcp-pro serve
 ```
 
 Or from a clone, which is what you want if you plan to change anything:
@@ -178,14 +183,14 @@ uv run python -m windows_mcp serve
 Install it as a background task that starts now and at every login:
 
 ```shell
-windows-mcp install
+windows-mcp-pro install
 
 # Or choose the HTTP transport and bind address explicitly
-windows-mcp install --transport sse --host 127.0.0.1 --port 8000
+windows-mcp-pro install --transport sse --host 127.0.0.1 --port 8000
 ```
 
 This creates a per-user Scheduled Task named `windows-mcp-server` and a wrapper script at
-`~/.windows-mcp/start-server.cmd`. Use `windows-mcp uninstall` to remove it. Logs are written
+`~/.windows-mcp/start-server.cmd`. Use `windows-mcp-pro uninstall` to remove it. Logs are written
 to `~/.windows-mcp/server.log` and `~/.windows-mcp/server.error.log`.
 
 <details>
@@ -207,10 +212,10 @@ npm install -g @anthropic-ai/mcpb
   ```json
   {
     "mcpServers": {
-      "windows-mcp": {
+      "windows-mcp-pro": {
         "command": "uvx",
         "args": [
-          "windows-mcp",
+          "windows-mcp-pro",
           "serve"
         ]
       }
@@ -230,13 +235,13 @@ npm install -g @anthropic-ai/mcpb
   ```json
   {
     "mcpServers": {
-      "windows-mcp": {
+      "windows-mcp-pro": {
         "command": "uv",
         "args": [
           "--directory",
-          "<path to the windows-mcp directory>",
+          "<path to the windows-mcp-pro directory>",
           "run",
-          "windows-mcp",
+          "windows-mcp-pro",
           "serve"
         ]
       }
@@ -257,13 +262,13 @@ npm install -g @anthropic-ai/mcpb
 
   **Option A: Using pre-installed executable**
 
-  1. In a terminal, run `uv tool install windows-mcp`.
+  1. In a terminal, run `uv tool install windows-mcp-pro`.
   2. Use the generated executable in your config:
   ```json
   {
     "mcpServers": {
-      "windows-mcp": {
-        "command": "C:\\Users\\<user>\\.local\\bin\\windows-mcp.exe",
+      "windows-mcp-pro": {
+        "command": "C:\\Users\\<user>\\.local\\bin\\windows-mcp-pro.exe",
         "args": ["serve"]
       }
     }
@@ -274,9 +279,9 @@ npm install -g @anthropic-ai/mcpb
   ```json
   {
     "mcpServers": {
-      "windows-mcp": {
+      "windows-mcp-pro": {
         "command": "C:\\Users\\<user>\\.local\\bin\\uvx.exe",
-        "args": ["windows-mcp", "serve"]
+        "args": ["windows-mcp-pro", "serve"]
       }
     }
   }
@@ -286,13 +291,13 @@ npm install -g @anthropic-ai/mcpb
   ```json
   {
     "mcpServers": {
-      "windows-mcp": {
+      "windows-mcp-pro": {
         "command": "C:\\Users\\<user>\\.local\\bin\\uv.exe",
         "args": [
           "--directory",
           "C:\\path\\to\\Windows-MCP",
           "run",
-          "windows-mcp",
+          "windows-mcp-pro",
           "serve"
         ]
       }
@@ -300,7 +305,7 @@ npm install -g @anthropic-ai/mcpb
   }
   ```
 
-  Replace `<user>` with your Windows username. To find the correct paths, run `where uvx`, `where windows-mcp`, or `where uv`. Fully quit Claude Desktop (Tray → Quit) and reopen after saving the config.
+  Replace `<user>` with your Windows username. To find the correct paths, run `where uvx`, `where windows-mcp-pro`, or `where uv`. Fully quit Claude Desktop (Tray → Quit) and reopen after saving the config.
 
   For additional Claude Desktop integration troubleshooting, see the [MCP documentation](https://modelcontextprotocol.io/quickstart/server#claude-for-desktop-integration-issues).
 </details>
@@ -319,7 +324,7 @@ npm install -g @anthropic-ai/mcpb
   {
     "command": "uvx",
     "args": [
-      "windows-mcp",
+      "windows-mcp-pro",
       "serve"
     ]
   }
@@ -332,9 +337,9 @@ npm install -g @anthropic-ai/mcpb
     "command": "uv",
     "args": [
       "--directory",
-      "<path to the windows-mcp directory>",
+      "<path to the windows-mcp-pro directory>",
       "run",
-      "windows-mcp",
+      "windows-mcp-pro",
       "serve"
     ]
   }
@@ -355,24 +360,24 @@ npm install -g @google/gemini-cli
 ```
 
   2. Open `%USERPROFILE%/.gemini/settings.json`.
-  3. Add the `windows-mcp` config and save it.
+  3. Add the `windows-mcp-pro` config and save it.
 
 ```json
 {
   "theme": "Default",
   ...
   "mcpServers": {
-    "windows-mcp": {
+    "windows-mcp-pro": {
       "command": "uvx",
       "args": [
-        "windows-mcp",
+        "windows-mcp-pro",
         "serve"
       ]
     }
   }
 }
 ```
-*Note: To run from source, replace the command with `uv` and args with `["--directory", "<path>", "run", "windows-mcp", "serve"]`.*
+*Note: To run from source, replace the command with `uv` and args with `["--directory", "<path>", "run", "windows-mcp-pro", "serve"]`.*
 
   4. Restart Gemini CLI.
 </details>
@@ -385,22 +390,22 @@ npm install -g @google/gemini-cli
 npm install -g @qwen-code/qwen-code@latest
 ```
   2. Open `%USERPROFILE%/.qwen/settings.json`.
-  3. Add the `windows-mcp` config and save it.
+  3. Add the `windows-mcp-pro` config and save it.
 
 ```json
 {
   "mcpServers": {
-    "windows-mcp": {
+    "windows-mcp-pro": {
       "command": "uvx",
       "args": [
-        "windows-mcp",
+        "windows-mcp-pro",
         "serve"
       ]
     }
   }
 }
 ```
-*Note: To run from source, replace the command with `uv` and args with `["--directory", "<path>", "run", "windows-mcp", "serve"]`.*
+*Note: To run from source, replace the command with `uv` and args with `["--directory", "<path>", "run", "windows-mcp-pro", "serve"]`.*
 
   4. Restart Qwen Code.
 </details>
@@ -413,17 +418,17 @@ npm install -g @qwen-code/qwen-code@latest
 npm install -g @openai/codex
 ```
   2. Open `%USERPROFILE%/.codex/config.toml`.
-  3. Add the `windows-mcp` config and save it.
+  3. Add the `windows-mcp-pro` config and save it.
 
 ```toml
-[mcp_servers.windows-mcp]
+[mcp_servers.windows-mcp-pro]
 command="uvx"
 args=[
-  "windows-mcp",
+  "windows-mcp-pro",
   "serve"
 ]
 ```
-*Note: To run from source, replace the command with `uv` and args with `["--directory", "<path>", "run", "windows-mcp", "serve"]`.*
+*Note: To run from source, replace the command with `uv` and args with `["--directory", "<path>", "run", "windows-mcp-pro", "serve"]`.*
 
   4. Restart Codex CLI.
 </details>
@@ -434,7 +439,7 @@ args=[
   Add the published stdio server from a Windows terminal:
 
   ```shell
-  autohand mcp add windows-mcp uvx windows-mcp serve
+  autohand mcp add windows-mcp-pro uvx windows-mcp-pro serve
   ```
 
   Add `--scope project` after `add` to keep the server configuration in the current project. See [Autohand Code](https://github.com/autohandai/code-cli/) for current installation and CLI details.
@@ -456,7 +461,7 @@ npm install -g @anthropic-ai/claude-code
   Use `uvx` to run the latest version directly from PyPI.
 
   ```shell
-  claude mcp add --transport stdio windows-mcp -- uvx windows-mcp serve
+  claude mcp add --transport stdio windows-mcp-pro -- uvx windows-mcp-pro serve
   ```
 
   **Option B: Install from Source**
@@ -469,7 +474,7 @@ npm install -g @anthropic-ai/claude-code
 
   2. Run the following command in your terminal:
   ```shell
-  claude mcp add --transport stdio windows-mcp -- uv --directory "<path>" run windows-mcp serve
+  claude mcp add --transport stdio windows-mcp-pro -- uv --directory "<path>" run windows-mcp-pro serve
   ```
 
   *Note: To make the server available across all projects, add `--scope user` to the command.*
@@ -479,7 +484,7 @@ npm install -g @anthropic-ai/claude-code
   **Note:** On Windows, if you encounter "Connection closed" errors, use the full path to `uvx.exe`:
 
   ```shell
-  claude mcp add --transport stdio windows-mcp -- C:\Users\<user>\.local\bin\uvx.exe windows-mcp serve
+  claude mcp add --transport stdio windows-mcp-pro -- C:\Users\<user>\.local\bin\uvx.exe windows-mcp-pro serve
   ```
 
   To verify the server is registered, run `claude mcp list`. Inside Claude Code, use `/mcp` to check server status.
@@ -495,7 +500,7 @@ npm install -g @anthropic-ai/claude-code
 
   2. From your **WSL terminal**, register the server:
   ```shell
-  claude mcp add windows-mcp --transport stdio -s user -- powershell.exe -Command "C:\Users\<user>\.local\bin\uvx.exe windows-mcp serve"
+  claude mcp add windows-mcp-pro --transport stdio -s user -- powershell.exe -Command "C:\Users\<user>\.local\bin\uvx.exe windows-mcp-pro serve"
   ```
 
   Replace `<user>` with your Windows username. The `-s user` flag makes the server available across all projects.
@@ -512,11 +517,11 @@ connected MCP client.
 
 ```shell
 # stdio transport (default)
-windows-mcp serve
+windows-mcp-pro serve
 
 # Or SSE / Streamable HTTP for network access
-windows-mcp serve --transport sse --host localhost --port 8000
-windows-mcp serve --transport streamable-http --host localhost --port 8000
+windows-mcp-pro serve --transport sse --host localhost --port 8000
+windows-mcp-pro serve --transport streamable-http --host localhost --port 8000
 ```
 
 From a clone without installing the entry point, use
@@ -529,7 +534,7 @@ Optional environment variables can be set to customize behavior — see [Environ
 For network access, enable authentication and TLS:
 
 ```shell
-windows-mcp serve --transport sse --host 0.0.0.0 \
+windows-mcp-pro serve --transport sse --host 0.0.0.0 \
   --auth-key "your_secret_token" \
   --ip-allowlist "203.0.113.0/24" \
   --ssl-certfile cert.pem --ssl-keyfile key.pem
@@ -551,13 +556,13 @@ See [🔐 Security & Access Control](#-security--access-control) for all options
 
 ### Authentication
 ```shell
-windows-mcp serve --transport sse --host 0.0.0.0 --auth-key "your_token"
+windows-mcp-pro serve --transport sse --host 0.0.0.0 --auth-key "your_token"
 ```
 Requires `Authorization: Bearer your_token` header on all requests.
 
 ### IP Allowlist
 ```shell
-windows-mcp serve --auth-key "token" --ip-allowlist "203.0.113.0/24,198.51.100.5"
+windows-mcp-pro serve --auth-key "token" --ip-allowlist "203.0.113.0/24,198.51.100.5"
 ```
 Restricts connections to specified CIDR ranges. Blocks private/loopback IPs by default.
 
@@ -568,7 +573,7 @@ By default, **no CORS headers are emitted**. Browsers block cross-origin request
 If you need a browser-based MCP client to reach the server, opt in with an explicit origin allowlist:
 
 ```shell
-windows-mcp serve --cors-origins "https://my-client.example.com,https://other.example.com"
+windows-mcp-pro serve --cors-origins "https://my-client.example.com,https://other.example.com"
 ```
 
 Only the listed origins receive `Access-Control-Allow-Origin` headers; all other cross-origin requests are rejected by the browser. The equivalent environment variable is `WINDOWS_MCP_CORS_ORIGINS`.
@@ -577,15 +582,15 @@ Only the listed origins receive `Access-Control-Allow-Origin` headers; all other
 All tools are enabled by default. Use `--tools` to whitelist specific tools, or `--exclude-tools` to block specific ones.
 
 ```shell
-windows-mcp serve --tools "PowerShell,Edit,Grep,Job"   # Enable only these tools
-windows-mcp serve --exclude-tools "PowerShell,Registry" # Disable specific tools
+windows-mcp-pro serve --tools "PowerShell,Edit,Grep,Job"   # Enable only these tools
+windows-mcp-pro serve --exclude-tools "PowerShell,Registry" # Disable specific tools
 ```
 
 ### TLS/HTTPS
 ```shell
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
 
-windows-mcp serve --ssl-certfile cert.pem --ssl-keyfile key.pem
+windows-mcp-pro serve --ssl-certfile cert.pem --ssl-keyfile key.pem
 ```
 
 ### OAuth 2.0 + PKCE
@@ -593,7 +598,7 @@ windows-mcp serve --ssl-certfile cert.pem --ssl-keyfile key.pem
 For MCP clients that use OAuth (e.g. Claude Desktop) instead of a static API key:
 
 ```shell
-windows-mcp serve --transport streamable-http --host 0.0.0.0 \
+windows-mcp-pro serve --transport streamable-http --host 0.0.0.0 \
   --ssl-certfile ~/.windows-mcp/cert.pem \
   --ssl-keyfile  ~/.windows-mcp/key.pem \
   --oauth-client-id my-client \
@@ -604,7 +609,7 @@ windows-mcp serve --transport streamable-http --host 0.0.0.0 \
 ```json
 {
   "mcpServers": {
-    "windows-mcp": {
+    "windows-mcp-pro": {
       "type": "http",
       "url": "https://<host>:8000/mcp/",
       "oauth": {
@@ -683,7 +688,7 @@ Place cert and key files in the same directory:
 Generate a self-signed cert directly into that directory:
 
 ```shell
-mkdir -p ~/.windows-mcp
+mkdir -p ~/.windows-mcp-pro
 openssl req -x509 -newkey rsa:4096 \
   -keyout ~/.windows-mcp/key.pem \
   -out ~/.windows-mcp/cert.pem \
@@ -695,13 +700,13 @@ openssl req -x509 -newkey rsa:4096 \
 Generate an auth key and save a working config to `~/.windows-mcp/config.toml`:
 
 ```shell
-windows-mcp auth
+windows-mcp-pro auth
 ```
 
 Generate auth plus a self-signed TLS certificate:
 
 ```shell
-windows-mcp auth --transport streamable-http --host 0.0.0.0 --port 8000 --with-tls
+windows-mcp-pro auth --transport streamable-http --host 0.0.0.0 --port 8000 --with-tls
 ```
 
 This command writes the auth key into the config file, can generate `cert.pem` and `key.pem`, and prints an example MCP client configuration for the selected transport.
@@ -770,7 +775,7 @@ Local (no security):
 {
   "mcpServers": {
     "windows-mcp-pro": {
-      "command": "windows-mcp",
+      "command": "windows-mcp-pro",
       "args": ["serve"],
       "env": {
         "WINDOWS_MCP_SEARCH_PYTHON": "C:/Users/you/AppData/Local/Programs/Python/Python312/python.exe"
@@ -785,7 +790,7 @@ Remote (with auth + IP allowlist + TLS):
 {
   "mcpServers": {
     "windows-mcp-pro": {
-      "command": "windows-mcp",
+      "command": "windows-mcp-pro",
       "args": ["serve", "--transport", "sse", "--host", "0.0.0.0"],
       "env": {
         "WINDOWS_MCP_AUTH_KEY": "your_token",
@@ -907,7 +912,7 @@ To disable telemetry, set `ANONYMIZED_TELEMETRY` to `false` in your MCP client c
 {
   "mcpServers": {
     "windows-mcp-pro": {
-      "command": "windows-mcp",
+      "command": "windows-mcp-pro",
       "args": [
         "serve"
       ],
@@ -937,7 +942,7 @@ For detailed information on what data is collected and how it is handled, please
   belong in `Job mode=start`.
 - **Windows only**, and PowerShell 5.1 CLIXML stderr is unescaped on a
   best-effort basis rather than fully parsed.
-- **Not on PyPI.** Install from git; `uvx windows-mcp` fetches upstream.
+- **Not on PyPI.** Install from git; `uvx windows-mcp-pro` fetches upstream.
 
 ## 🪪 License
 

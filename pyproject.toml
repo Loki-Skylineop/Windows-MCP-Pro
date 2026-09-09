@@ -1,13 +1,16 @@
 [project]
-name = "windows-mcp"
+name = "windows-mcp-pro"
 version = "0.8.5"
-description = "Lightweight MCP Server for interacting with Windows Operating System."
+description = "Coding-agent MCP server for Windows: shell, surgical file edits, code search, git and web research."
 authors = [
     { name = "Jeomon George", email = "jeogeoalukka@gmail.com" }
 ]
+maintainers = [
+    { name = "Loki-Skylineop" }
+]
 readme = "README.md"
 license = { file = "LICENSE.md" }
-keywords = ["windows", "mcp", "ai", "desktop", "ai agent"]
+keywords = ["windows", "mcp", "ai", "ai agent", "coding agent", "powershell", "git", "web search"]
 requires-python = ">=3.14"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -15,7 +18,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows :: Windows 10",
     "Operating System :: Microsoft :: Windows :: Windows 11",
     "Programming Language :: Python :: 3.14",
-    "Topic :: Desktop Environment",
+    "Topic :: Software Development",
     "Topic :: System :: Shells",
 ]
 dependencies = [
@@ -52,7 +55,7 @@ Issues = "https://github.com/Loki-Skylineop/Windows-MCP-Pro/issues"
 Upstream = "https://github.com/CursorTouch/Windows-MCP"
 
 [project.scripts]
-windows-mcp = "windows_mcp.__main__:main"
+windows-mcp-pro = "windows_mcp.__main__:main"
 
 [build-system]
 requires = ["setuptools>=61"]

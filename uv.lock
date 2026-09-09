@@ -1753,7 +1753,7 @@ wheels = [
 ]
 
 [[package]]
-name = "windows-mcp"
+name = "windows-mcp-pro"
 version = "0.8.5"
 source = { editable = "." }
 dependencies = [

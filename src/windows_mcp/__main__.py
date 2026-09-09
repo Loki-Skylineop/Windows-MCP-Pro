@@ -41,7 +41,7 @@ def _echo_section(title: str) -> None:
     when the current stdout encoding can't represent the U+2500
     box-drawing character.
 
-    Without this guard, `windows-mcp auth` crashes on the default
+    Without this guard, `windows-mcp-pro auth` crashes on the default
     PowerShell / cmd console (cp1252) with a UnicodeEncodeError when
     click.echo hits ─. The config file is already written at this
     point, but the noisy traceback obscures the success and breaks
@@ -202,7 +202,7 @@ def _exit_missing_dependency(exc: ModuleNotFoundError) -> NoReturn:
     """
     logger.debug("Startup import failed", exc_info=exc)
     click.echo(
-        f"windows-mcp: cannot start -- {exc}. The environment looks partially "
+        f"windows-mcp-pro: cannot start -- {exc}. The environment looks partially "
         f"installed; run `uv sync` in the extension directory, then restart the client.",
         err=True,
     )
@@ -274,7 +274,7 @@ def _build_mcp() -> FastMCP:
             if analytics:
                 await analytics.close()
 
-    _mcp = FastMCP(name="windows-mcp", instructions=instructions, lifespan=lifespan)
+    _mcp = FastMCP(name="windows-mcp-pro", instructions=instructions, lifespan=lifespan)
     register_all(_mcp, get_desktop=_get_desktop, get_analytics=_get_analytics)
     return _mcp
 
@@ -313,12 +313,12 @@ class _LegacyAwareGroup(click.Group):
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         legacy_arg = self._first_legacy_arg_before_subcommand(args)
         if legacy_arg:
-            suggested = shlex.join(["windows-mcp", "serve", *args])
+            suggested = shlex.join(["windows-mcp-pro", "serve", *args])
             raise click.UsageError(
-                "`windows-mcp` is now a command group. Did you mean:\n"
+                "`windows-mcp-pro` is now a command group. Did you mean:\n"
                 f"    {suggested}\n"
                 "These flags belong on the `serve` subcommand. "
-                "See `windows-mcp serve --help`.",
+                "See `windows-mcp-pro serve --help`.",
                 ctx=ctx,
             )
         return super().parse_args(ctx, args)
@@ -465,7 +465,7 @@ def main():
 )
 @click.option(
     "--config",
-    help="Path to windows-mcp config file (default: ~/.windows-mcp/config.toml).",
+    help="Path to windows-mcp-pro config file (default: ~/.windows-mcp/config.toml).",
     default=None,
     type=click.Path(dir_okay=False),
     show_default=False,
@@ -700,7 +700,7 @@ def serve(
 
     scheme = "https" if ssl_certfile else "http"
     logger.debug(
-        "Starting windows-mcp (transport=%s, %s, auth=%s, oauth=%s, ip-allowlist=%s, cors=%s, tools=%s, exclude=%s)",
+        "Starting windows-mcp-pro (transport=%s, %s, auth=%s, oauth=%s, ip-allowlist=%s, cors=%s, tools=%s, exclude=%s)",
         transport,
         scheme,
         "on" if auth_key else "off",
@@ -781,7 +781,7 @@ def _gen_tls(host: str, cert_path, key_path) -> None:
                 "365",
                 "-nodes",
                 "-subj",
-                f"/CN={host or 'windows-mcp'}",
+                f"/CN={host or 'windows-mcp-pro'}",
             ],
             capture_output=True,
             text=True,
@@ -802,7 +802,7 @@ _START_SCRIPT_PATH = CONFIG_DIR / "start-server.cmd"
 
 
 def _resolve_program() -> list[str]:
-    """Return the argv prefix to invoke `windows-mcp serve` from Task Scheduler.
+    """Return the argv prefix to invoke `windows-mcp-pro serve` from Task Scheduler.
 
     Uses the running interpreter so the wrapper always targets this exact
     installation, regardless of what (if anything) is on PATH.
@@ -853,7 +853,7 @@ def _register_task_powershell(task_name: str, script_path: str) -> subprocess.Co
 @click.option("--port", default=8000, show_default=True, type=int, help="Port to bind.")
 @click.option("--force", is_flag=True, help="Reinstall even if already installed.")
 def install(transport: str, host: str, port: int, force: bool) -> None:
-    """Install windows-mcp as a scheduled task that starts at login."""
+    """Install windows-mcp-pro as a scheduled task that starts at login."""
     query = _schtasks("/Query", "/TN", _TASK_NAME)
     if query.returncode == 0 and not force:
         click.echo(f"Scheduled task '{_TASK_NAME}' is already installed.")
@@ -887,12 +887,12 @@ def install(transport: str, host: str, port: int, force: bool) -> None:
     click.echo(f"  Address   : {host}:{port}")
     click.echo(f"  Logs      : {CONFIG_DIR / 'server.log'}")
     click.echo("\nThe server will restart automatically at every login.")
-    click.echo("Run `windows-mcp uninstall` to remove it.")
+    click.echo("Run `windows-mcp-pro uninstall` to remove it.")
 
 
 @main.command()
 def uninstall() -> None:
-    """Remove the windows-mcp scheduled task and stop the background server."""
+    """Remove the windows-mcp-pro scheduled task and stop the background server."""
     stop_result = _schtasks("/End", "/TN", _TASK_NAME)
     if stop_result.returncode == 0:
         click.echo("Stopped the running server.")
@@ -907,7 +907,7 @@ def uninstall() -> None:
         _START_SCRIPT_PATH.unlink()
         click.echo(f"Removed {_START_SCRIPT_PATH}")
 
-    click.echo("windows-mcp will no longer start at login.")
+    click.echo("windows-mcp-pro will no longer start at login.")
 
 
 @main.command()
@@ -970,9 +970,9 @@ def auth(transport: str, host: str, port: int, with_tls: bool, force: bool) -> N
             """\
 {
   "mcpServers": {
-    "windows-mcp": {
+    "windows-mcp-pro": {
       "command": "uvx",
-      "args": ["windows-mcp", "serve"]
+      "args": ["windows-mcp-pro", "serve"]
     }
   }
 }"""
@@ -984,7 +984,7 @@ def auth(transport: str, host: str, port: int, with_tls: bool, force: bool) -> N
     sse_url = f"{scheme}://{host}:{port}/sse"
 
     _echo_section("Start the server")
-    click.echo("  windows-mcp serve")
+    click.echo("  windows-mcp-pro serve")
 
     if transport == "sse":
         _echo_section("Claude Desktop config (SSE)")
@@ -992,7 +992,7 @@ def auth(transport: str, host: str, port: int, with_tls: bool, force: bool) -> N
             f"""\
 {{
   "mcpServers": {{
-    "windows-mcp": {{
+    "windows-mcp-pro": {{
       "type": "sse",
       "url": "{sse_url}",
       "headers": {{ "Authorization": "Bearer {new_key}" }}
@@ -1006,7 +1006,7 @@ def auth(transport: str, host: str, port: int, with_tls: bool, force: bool) -> N
             f"""\
 {{
   "mcpServers": {{
-    "windows-mcp": {{
+    "windows-mcp-pro": {{
       "type": "http",
       "url": "{mcp_url}",
       "headers": {{ "Authorization": "Bearer {new_key}" }}

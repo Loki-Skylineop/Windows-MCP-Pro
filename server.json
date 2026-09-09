@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
-  "name": "io.github.CursorTouch/Windows-MCP",
-  "description": "An MCP Server for computer-use in Windows OS",
+  "name": "io.github.Loki-Skylineop/Windows-MCP-Pro",
+  "description": "Coding-agent MCP server for Windows: shell, surgical file edits, code search, git and web research",
   "status": "active",
   "repository": {
-    "url": "https://github.com/CursorTouch/Windows-MCP",
+    "url": "https://github.com/Loki-Skylineop/Windows-MCP-Pro",
     "source": "github"
   },
   "version": "1.0.1",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "windows-mcp",
+      "identifier": "windows-mcp-pro",
       "version": "0.8.5",
       "runtimeHint": "uvx",
       "transport": {
