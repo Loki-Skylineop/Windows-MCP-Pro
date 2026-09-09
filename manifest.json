@@ -92,7 +92,7 @@
     },
     {
       "name": "SearchPro",
-      "description": "Web research in one tool. mode=search, news, images and videos metasearch through ddgs (Brave, Yandex, DuckDuckGo, Bing, Yahoo), mode=books through Open Library. mode=read extracts an article as clean text, mode=select scrapes CSS selectors, mode=crawl drives a headless browser for JavaScript pages, mode=env diagnoses the search stack. Runs out of process, budgets its output, and refuses private or non-HTTP fetch targets."
+      "description": "Web research in one tool. mode=search, news, images and videos metasearch through ddgs (Brave, Yandex, DuckDuckGo, Bing, Yahoo), mode=books reads Open Library and falls back to Google Books, then plain web search. mode=read extracts an article as clean text, mode=select scrapes CSS selectors, mode=crawl drives a headless browser for JavaScript pages, mode=env diagnoses the search stack. Runs out of process, budgets its output, and refuses private or non-HTTP fetch targets."
     },
     {
       "name": "App",

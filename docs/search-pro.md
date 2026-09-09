@@ -98,7 +98,7 @@ Measured on this machine (same query, `region=ru-ru`):
 The default chain stops at the first backend that returns anything, and reports
 what it skipped (`Backends tried before this: ...`).
 
-### Books come from Open Library, not ddgs
+### Books: Open Library, then Google Books, then the open web
 
 `ddgs` still exposes a `books()` method, but every backend behind it answers
 `No results found` (measured 2026-09), so `mode=books` was a mode that could
@@ -108,6 +108,21 @@ the first publication year, the edition count, languages and subjects, plus the
 total number of matches when it exceeds the page. `backend` and `timelimit` do
 not apply there and are reported as ignored. To find book *pages* on the open
 web, `mode=search` is still the right tool.
+
+The request goes out over urllib first and, when that handshake is cut, is
+repeated through scrapling's curl_cffi stack, which presents a Chrome TLS
+fingerprint. The two stacks are blocked by different hosts - openlibrary.org
+drops urllib mid-handshake on some networks, example.com refuses curl_cffi - so
+trying both is what makes the mode survive. A failed reply names each attempt
+under `Tried:`.
+
+When Open Library cannot be reached at all, the mode asks Google Books, and if
+that is rate-limited too it falls back to ordinary metasearch for the same query
+plus the word `book`. The header always says which rung answered (`engine=openlibrary`,
+`engine=googlebooks`, `engine=web`) and the web fallback adds an explicit note,
+so web pages are never passed off as catalogue records. Budget split: Open
+Library gets half of `timeout`, Google Books a quarter, the search chain the
+rest.
 
 ### How select and read fetch
 
@@ -202,7 +217,7 @@ silently reading the first URL.
 | `did not finish within Ns` | slow site or huge page | lower `max_results`, narrow `focus`, or use `Job` |
 | empty `select` output | site changed its CSS classes | check the markup with `mode=read`, fix the selectors |
 | `Invalid CSS selector 'h1, body=p'` | selector pairs joined with a comma | separate the pairs with `;` or a newline |
-| `Open Library did not answer` | openlibrary.org unreachable or throttled | retry, or use `mode=search` for book pages |
+| `no book catalogue answered` | Open Library, Google Books and the search chain all failed | retry in a moment, or use `mode=search` for book pages |
 
 The local playbook that this tool encodes - measurements, dead backends,
 per-marketplace parsers - lives at `Утилиты\seach.md`.

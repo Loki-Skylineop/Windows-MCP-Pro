@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%2010%E2%80%9311-blue" alt="Platform">
   <img src="https://img.shields.io/badge/tools-13-blue" alt="13 tools">
-  <img src="https://img.shields.io/badge/tests-808%20passing-brightgreen" alt="808 tests passing">
+  <img src="https://img.shields.io/badge/tests-813%20passing-brightgreen" alt="808 tests passing">
 
   <p><b>A coding-agent fork of <a href="https://github.com/CursorTouch/Windows-MCP">CursorTouch/Windows-MCP</a> v0.8.5</b></p>
 
@@ -849,7 +849,8 @@ upstream GUI set was removed for exactly that reason (see
 
 - `SearchPro`: Web search and page extraction in one tool - `search`, `news`,
   `images`, `videos` (ddgs metasearch over brave/yandex/duckduckgo/bing/yahoo),
-  `books` (Open Library), `read` (URL to clean markdown, up to five
+  `books` (Open Library, falling back to Google Books and then plain web
+  search), `read` (URL to clean markdown, up to five
   URLs in one call), `select` (CSS selectors to records), `crawl` (headless
   Chromium with `wait_for`/`js`/`scroll`/`focus`) and `env` (diagnostics).
   Fetched pages are cached for ten minutes, so re-reading the same URL inside

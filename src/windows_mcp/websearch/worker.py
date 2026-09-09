@@ -47,6 +47,7 @@ DEFAULT_BACKENDS = ("auto", "brave", "yandex", "duckduckgo", "bing", "yahoo")
 # (measured 2026-09), so mode=books talks to Open Library instead: a free JSON
 # API with no key, no quota and a documented schema.
 OPENLIBRARY_SEARCH = "https://openlibrary.org/search.json"
+GOOGLE_BOOKS_SEARCH = "https://www.googleapis.com/books/v1/volumes"
 OPENLIBRARY_FIELDS = "key,title,author_name,first_publish_year,edition_count,language,subject"
 
 HTTP_UA = (
@@ -238,16 +239,89 @@ def _book_row(doc: dict) -> dict:
     }
 
 
+def _fetch_json(url: str, timeout: int) -> tuple:
+    """Return (data, tried). GETs JSON over whichever HTTP stack the host allows.
+
+    urllib speaks OpenSSL, scrapling speaks curl_cffi with a Chrome TLS
+    fingerprint, and hosts break them in different ways: openlibrary.org keeps
+    dropping urllib's handshake mid-way (measured: UNEXPECTED_EOF and handshake
+    timeouts on consecutive calls), while example.com refuses curl_cffi. Trying
+    both, each on half the budget, means one bad stack no longer kills the mode.
+    """
+    import urllib.request
+
+    attempt = max(5, timeout // 2)
+    tried: list[str] = []
+
+    request = urllib.request.Request(url, headers={"User-Agent": HTTP_UA})
+    try:
+        with urllib.request.urlopen(request, timeout=attempt) as response:
+            return json.loads(response.read().decode("utf-8", errors="replace")), tried
+    except Exception as exc:
+        tried.append(f"urllib: {type(exc).__name__}: {exc}")
+
+    try:
+        from scrapling.fetchers import Fetcher
+
+        try:
+            page = Fetcher.get(url, timeout=attempt, retries=1, retry_delay=0)
+        except TypeError:  # older scrapling without the retry knobs
+            page = Fetcher.get(url, timeout=attempt)
+        loader = getattr(page, "json", None)
+        if callable(loader):
+            return loader(), tried
+        raw = getattr(page, "body", None) or getattr(page, "html_content", None) or str(page)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        return json.loads(raw), tried
+    except Exception as exc:
+        tried.append(f"scrapling: {type(exc).__name__}: {exc}")
+
+    return None, tried
+
+
+def _google_book_row(item: dict) -> dict:
+    """Map one Google Books volume onto the same row shape as Open Library."""
+    info = item.get("volumeInfo") or {}
+    authors = ", ".join(str(name) for name in (info.get("authors") or [])[:3])
+    categories = ", ".join(str(name) for name in (info.get("categories") or [])[:5])
+
+    extra: dict[str, str] = {}
+    published = str(info.get("publishedDate") or "")[:4]
+    if published:
+        extra["first_published"] = published
+    if info.get("pageCount"):
+        extra["pages"] = str(info["pageCount"])
+    if info.get("language"):
+        extra["languages"] = str(info["language"])
+
+    pieces = []
+    if authors:
+        pieces.append(f"by {authors}")
+    if categories:
+        pieces.append(f"subjects: {categories}")
+
+    return {
+        "title": _clean_ws(info.get("title")),
+        "url": info.get("infoLink") or info.get("canonicalVolumeLink") or "",
+        "snippet": _clean_ws(" - ".join(pieces)),
+        "extra": extra,
+    }
+
+
 def do_books(payload: dict) -> dict:
-    """Search books through Open Library.
+    """Search books through a ladder of catalogues, then the open web.
 
     ddgs still advertises a books() method, but every backend it offers answers
     'No results found' (measured 2026-09), so routing this mode through ddgs
-    produced nothing but a confident failure. Open Library needs no key and
-    returns a documented JSON schema, so the mode now actually answers.
+    produced nothing but a confident failure. Open Library answers with a
+    documented JSON schema and no key; Google Books covers what it misses; and
+    when a network blocks both - measured on this machine: openlibrary.org's TLS
+    handshake dropped on both HTTP stacks while googleapis.com answered 429 -
+    ordinary metasearch still finds book pages, which beats returning nothing as
+    long as the reply admits where the rows came from.
     """
     import urllib.parse
-    import urllib.request
 
     query = (payload.get("query") or "").strip()
     if not query:
@@ -255,50 +329,66 @@ def do_books(payload: dict) -> dict:
 
     limit = max(1, min(int(payload.get("max_results") or 8), 100))
     budget = int(payload.get("fetch_timeout") or 30)
-    # Two short attempts rather than one long one: openlibrary.org occasionally
-    # hangs the TLS handshake, and a single full-budget attempt turned that
-    # hiccup into a dead mode (measured: 30 s of nothing, then a retry that
-    # answered in 10 s). Half the budget each means a stuck handshake fails over
-    # instead of eating the whole call.
-    attempt = max(5, budget // 2)
-    params = urllib.parse.urlencode({"q": query, "limit": limit, "fields": OPENLIBRARY_FIELDS})
-    request = urllib.request.Request(
-        f"{OPENLIBRARY_SEARCH}?{params}", headers={"User-Agent": HTTP_UA}
-    )
-
-    data = None
     tried: list[str] = []
-    for _ in range(2):
-        try:
-            with urllib.request.urlopen(request, timeout=attempt) as response:
-                data = json.loads(response.read().decode("utf-8", errors="replace"))
-            break
-        except Exception as exc:
-            tried.append(f"openlibrary: {type(exc).__name__}: {exc}")
 
-    if data is None:
+    params = urllib.parse.urlencode({"q": query, "limit": limit, "fields": OPENLIBRARY_FIELDS})
+    data, attempts = _fetch_json(f"{OPENLIBRARY_SEARCH}?{params}", max(10, budget // 2))
+    tried += [f"openlibrary via {item}" for item in attempts]
+    if data is not None:
+        results = [_book_row(doc) for doc in (data.get("docs") or [])][:limit]
+        total = data.get("numFound")
         return {
-            "ok": False,
             "engine": "openlibrary",
             "query": query,
-            "results": [],
-            "count": 0,
+            "results": results,
+            "count": len(results),
+            "total": int(total) if isinstance(total, int) else len(results),
             "tried": tried,
-            "error": (
-                "Open Library did not answer - retry in a moment, or use mode=search "
-                "to find book pages on the open web"
-            ),
         }
 
-    results = [_book_row(doc) for doc in (data.get("docs") or [])][:limit]
-    total = data.get("numFound")
+    params = urllib.parse.urlencode({"q": query, "maxResults": min(limit, 40)})
+    data, attempts = _fetch_json(f"{GOOGLE_BOOKS_SEARCH}?{params}", max(8, budget // 4))
+    tried += [f"googlebooks via {item}" for item in attempts]
+    if data is not None:
+        results = [_google_book_row(item) for item in (data.get("items") or [])][:limit]
+        if results:
+            total = data.get("totalItems")
+            return {
+                "engine": "googlebooks",
+                "query": query,
+                "results": results,
+                "count": len(results),
+                "total": int(total) if isinstance(total, int) else len(results),
+                "tried": tried,
+            }
+        tried.append("googlebooks: no volumes matched")
+
+    try:
+        web = _search({"query": f"{query} book", "max_results": limit, "region": "wt-wt"}, "text")
+    except Exception as exc:  # ddgs missing, or the whole metasearch chain refused
+        web = {"tried": [f"{type(exc).__name__}: {exc}"]}
+    tried += [f"web {item}" for item in (web.get("tried") or [])]
+    results = (web.get("results") or [])[:limit]
+    if results:
+        return {
+            "engine": "web",
+            "query": query,
+            "results": results,
+            "count": len(results),
+            "tried": tried,
+        }
+
     return {
-        "engine": "openlibrary",
+        "ok": False,
+        "engine": "books",
         "query": query,
-        "results": results,
-        "count": len(results),
-        "total": int(total) if isinstance(total, int) else len(results),
+        "results": [],
+        "count": 0,
         "tried": tried,
+        "error": (
+            "no book catalogue answered and the web fallback found nothing - "
+            "retry in a moment, or use mode=search to find book pages yourself"
+        ),
     }
 
 

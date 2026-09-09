@@ -645,7 +645,7 @@ def run(
 
     if normalised == "books" and (backend or timelimit):
         notes.append(
-            "Note: mode=books is served by Open Library, so backend and timelimit are ignored."
+            "Note: mode=books tries Open Library, then Google Books, then plain web search, so backend and timelimit are ignored."
         )
 
     limit = int(max_results) if max_results else DEFAULT_MAX_RESULTS
@@ -717,6 +717,11 @@ def run(
         raise RuntimeError(f"SearchPro mode={normalised} failed: {detail}")
 
     if normalised in LIST_MODES:
+        if normalised == "books" and reply.get("engine") == "web":
+            notes.append(
+                "Note: both book catalogues were unreachable from this machine, so these "
+                "are ordinary web results for the same query, not catalogue records."
+            )
         return _format_list(reply, normalised, notes)
     if normalised in BATCH_MODES and reply.get("documents") is not None:
         return _format_documents(reply, chars, notes)

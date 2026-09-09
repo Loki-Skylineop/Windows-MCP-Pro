@@ -701,8 +701,8 @@ class TestBooksMode:
         assert reply["results"][0]["extra"]["editions"] == "161"
         assert captured["url"].startswith("https://openlibrary.org/search.json?")
         assert "limit=3" in captured["url"]
-        # Half the budget per attempt, so a hung handshake can still fail over.
-        assert captured["timeout"] == 10
+        # Open Library gets half the budget, and halves it again per HTTP stack.
+        assert captured["timeout"] == 5
 
     def test_books_reports_an_unreachable_open_library(self, monkeypatch):
         attempts: list = []
@@ -711,33 +711,143 @@ class TestBooksMode:
             attempts.append(timeout)
             raise OSError("dns is down")
 
+        class DeadFetcher:
+            @staticmethod
+            def get(url, **kwargs):
+                raise RuntimeError("curl: (35) BoringSSL SSL_connect")
+
         monkeypatch.setattr(urllib.request, "urlopen", boom)
+        _fake_scrapling(monkeypatch, DeadFetcher)
+        monkeypatch.setattr(
+            worker, "_search", lambda payload, kind: {"results": [], "tried": ["brave: no results"]}
+        )
 
         reply = worker.do_books({"query": "dune"})
 
         assert reply["ok"] is False
-        assert "Open Library" in reply["error"]
-        assert "dns is down" in reply["tried"][0]
-        assert attempts == [15, 15]
-        assert len(reply["tried"]) == 2
+        assert "no book catalogue answered" in reply["error"]
+        # Every rung that was cut is named, so the reason is visible, not guessed.
+        assert "openlibrary via urllib: OSError: dns is down" == reply["tried"][0]
+        assert "BoringSSL" in reply["tried"][1]
+        assert any("googlebooks via" in item for item in reply["tried"])
+        # Open Library takes half the budget, Google Books a quarter, halved per stack.
+        assert attempts == [7, 5]
 
-    def test_books_survives_a_flaky_handshake(self, monkeypatch):
+    def test_books_falls_back_to_the_other_tls_stack(self, monkeypatch):
         document = {"numFound": 1, "docs": [{"key": "/works/OL1W", "title": "Dune"}]}
         calls: list = []
 
-        def flaky(request, timeout=None):
-            calls.append(timeout)
-            if len(calls) == 1:
-                raise TimeoutError("handshake timed out")
-            return _FakeResponse(json.dumps(document).encode("utf-8"))
+        def dropped(request, timeout=None):
+            raise OSError("SSL: UNEXPECTED_EOF_WHILE_READING")
 
-        monkeypatch.setattr(urllib.request, "urlopen", flaky)
+        class FakeFetcher:
+            @staticmethod
+            def get(url, **kwargs):
+                calls.append(dict(kwargs))
+                return types.SimpleNamespace(json=lambda: document)
+
+        monkeypatch.setattr(urllib.request, "urlopen", dropped)
+        _fake_scrapling(monkeypatch, FakeFetcher)
 
         reply = worker.do_books({"query": "dune", "fetch_timeout": 30})
 
         assert reply["results"][0]["title"] == "Dune"
-        assert calls == [15, 15]
-        assert "handshake timed out" in reply["tried"][0]
+        assert calls[0]["timeout"] == 7
+        assert "UNEXPECTED_EOF" in reply["tried"][0]
+
+    def test_books_reads_a_scrapling_body_without_a_json_helper(self, monkeypatch):
+        document = {"numFound": 2, "docs": [{"key": "/works/OL2W", "title": "Dune Messiah"}]}
+
+        def dropped(request, timeout=None):
+            raise TimeoutError("handshake timed out")
+
+        class BodyFetcher:
+            @staticmethod
+            def get(url, **kwargs):
+                return types.SimpleNamespace(body=json.dumps(document).encode("utf-8"))
+
+        monkeypatch.setattr(urllib.request, "urlopen", dropped)
+        _fake_scrapling(monkeypatch, BodyFetcher)
+
+        reply = worker.do_books({"query": "dune"})
+
+        assert reply["results"][0]["title"] == "Dune Messiah"
+        assert reply["total"] == 2
+    def test_books_falls_back_to_google_books(self, monkeypatch):
+        volume = {
+            "volumeInfo": {
+                "title": "Dune",
+                "authors": ["Frank Herbert"],
+                "publishedDate": "1965-08-01",
+                "language": "en",
+                "pageCount": 412,
+                "categories": ["Fiction"],
+                "infoLink": "https://books.google.com/books?id=abc",
+            }
+        }
+        seen: list = []
+
+        def fake_fetch(url, timeout):
+            seen.append((url.split("?")[0], timeout))
+            if "openlibrary" in url:
+                return None, ["urllib: OSError: handshake dropped"]
+            return {"totalItems": 7, "items": [volume]}, []
+
+        monkeypatch.setattr(worker, "_fetch_json", fake_fetch)
+
+        reply = worker.do_books({"query": "dune", "fetch_timeout": 40})
+
+        assert reply["engine"] == "googlebooks"
+        assert reply["results"][0]["title"] == "Dune"
+        assert reply["results"][0]["extra"]["first_published"] == "1965"
+        assert reply["results"][0]["url"] == "https://books.google.com/books?id=abc"
+        assert reply["total"] == 7
+        assert reply["tried"][0].startswith("openlibrary via")
+        # Open Library is asked first and gets the larger slice of the budget.
+        assert seen[0][0].endswith("openlibrary.org/search.json")
+        assert [timeout for _, timeout in seen] == [20, 10]
+
+    def test_books_falls_back_to_the_open_web(self, monkeypatch):
+        monkeypatch.setattr(
+            worker, "_fetch_json", lambda url, timeout: (None, ["urllib: OSError: blocked"])
+        )
+        captured: dict = {}
+
+        def fake_search(payload, kind):
+            captured["payload"] = payload
+            captured["kind"] = kind
+            return {
+                "engine": "ddgs:brave",
+                "results": [{"title": "Dune (novel)", "url": "https://example.org/dune"}],
+                "tried": ["brave: ok"],
+            }
+
+        monkeypatch.setattr(worker, "_search", fake_search)
+
+        reply = worker.do_books({"query": "dune", "max_results": 3})
+
+        # A blocked catalogue should degrade to book pages, not to an empty answer.
+        assert reply["engine"] == "web"
+        assert reply["results"][0]["title"] == "Dune (novel)"
+        assert captured["kind"] == "text"
+        assert captured["payload"]["query"] == "dune book"
+        assert captured["payload"]["max_results"] == 3
+        assert any("googlebooks via" in item for item in reply["tried"])
+
+    def test_books_survives_a_missing_ddgs(self, monkeypatch):
+        monkeypatch.setattr(
+            worker, "_fetch_json", lambda url, timeout: (None, ["urllib: OSError: blocked"])
+        )
+
+        def explode(payload, kind):
+            raise ModuleNotFoundError("No module named 'ddgs'")
+
+        monkeypatch.setattr(worker, "_search", explode)
+
+        reply = worker.do_books({"query": "dune"})
+
+        assert reply["ok"] is False
+        assert any("ddgs" in item for item in reply["tried"])
 
     def test_books_needs_a_query_in_the_worker_too(self):
         with pytest.raises(ValueError, match="requires a query"):
