@@ -203,7 +203,14 @@ def run(
     session: str | None = None,
     shell: str | None = None,
 ) -> ShellResult:
-    """Execute *command* and always return a structured result (never raises)."""
+    """Execute *command* and return a structured result.
+
+    A failing command is a *result*, not an exception: its exit code, stdout
+    and stderr are handed back to the caller. An infrastructure failure - the
+    shell binary missing, a broken pipe - is deliberately left to propagate,
+    so the caller can tell "your command failed" apart from "this tool is
+    broken". MCP marks only the latter with isError=true.
+    """
     result = ShellResult(session=session)
     if not command or not str(command).strip():
         result.stderr = "Error: 'command' is required."
@@ -258,9 +265,6 @@ def run(
             f"Command exceeded the {timeout}s timeout and its process tree was killed. "
             "Partial output is preserved above. For long work use: Job mode=start command=..."
         )
-    except Exception as exc:  # pragma: no cover - defensive
-        result.exit_code = 1
-        result.stderr = f"{type(exc).__name__}: {exc}"
     finally:
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         if temp_script:

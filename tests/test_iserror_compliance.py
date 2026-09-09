@@ -38,7 +38,7 @@ def mcp():
 def test_shell_tool_error_is_error_true(monkeypatch, mcp):
     """Shell tool failure must surface as ToolError → isError=true on wire."""
     from windows_mcp.tools.shell import register as shell_tool_reg
-    from windows_mcp.powershell import PowerShellExecutor
+    from windows_mcp.coding import shell_service
 
     shell_tool_reg(mcp, get_desktop=lambda: None, get_analytics=lambda: None)
     error_msg = "command rejected"
@@ -46,7 +46,12 @@ def test_shell_tool_error_is_error_true(monkeypatch, mcp):
     def _raise(*args, **kwargs):  # noqa: ARG001
         raise RuntimeError(error_msg)
 
-    monkeypatch.setattr(PowerShellExecutor, "execute_command", _raise)
+    # The PowerShell tool now executes through coding.shell_service, so the
+    # failure is injected at the process-spawn boundary that path actually
+    # uses. That covers both layers at once: the service must not swallow the
+    # exception into its result, and the tool handler must not catch it and
+    # return a plain "Error: ..." string with isError=false.
+    monkeypatch.setattr(shell_service, "run_with_graceful_timeout", _raise)
     with pytest.raises(ToolError) as exc_info:
         asyncio.run(mcp.call_tool("PowerShell", {"command": "bad-cmd"}))
     assert error_msg in str(exc_info.value)

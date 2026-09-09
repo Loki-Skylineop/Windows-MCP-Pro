@@ -3,7 +3,6 @@
 from mcp.types import ToolAnnotations
 from windows_mcp.coding import shell_service
 from windows_mcp.infrastructure import with_analytics
-from windows_mcp.powershell import PowerShellExecutor
 from fastmcp import Context
 
 _DESCRIPTION = (
@@ -47,10 +46,10 @@ def register(mcp, *, get_desktop, get_analytics):
         session: str = None,
         ctx: Context = None,
     ) -> str:
-        try:
-            result = shell_service.run(command, timeout=timeout, cwd=cwd, session=session)
-            return shell_service.format_result(result)
-        except Exception:
-            # Never lose the ability to run a command: fall back to the plain executor.
-            response, status_code = PowerShellExecutor.execute_command(command, timeout)
-            return f"Response: {response}\nStatus Code: {status_code}"
+        # No blanket `except Exception` here, on purpose. An infrastructure
+        # failure has to propagate so MCP reports isError=true, instead of a
+        # formatted string that looks like a successful run. Falling back to
+        # another executor would be worse than useless: the command may have
+        # run already, so the retry could apply the same side effect twice.
+        result = shell_service.run(command, timeout=timeout, cwd=cwd, session=session)
+        return shell_service.format_result(result)
