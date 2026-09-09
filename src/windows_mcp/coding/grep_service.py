@@ -311,8 +311,23 @@ def repo_map(
     return "\n".join(out)
 
 
-def outline(path: str, *, encoding: str = "utf-8", max_symbols: int = 400) -> str:
-    """List the declarations in a source file with line numbers."""
+DEFAULT_OUTLINE_SYMBOLS = 100
+HARD_OUTLINE_SYMBOLS = 2000
+
+
+def outline(
+    path: str,
+    *,
+    encoding: str = "utf-8",
+    max_symbols: int = DEFAULT_OUTLINE_SYMBOLS,
+) -> str:
+    """List the declarations in a source file with line numbers.
+
+    The cap is load-bearing: an outline of a generated 5,000-line file can
+    otherwise return thousands of declarations and blow up the caller's
+    context window. Anything hidden is reported as a count, so the caller
+    knows the list is partial instead of silently trusting it.
+    """
     target = _resolve(path)
     if not os.path.isfile(target):
         return f"Error: file not found: {target}"
@@ -325,19 +340,37 @@ def outline(path: str, *, encoding: str = "utf-8", max_symbols: int = 400) -> st
     except OSError as exc:
         return f"Error: cannot read {target}: {exc}"
 
+    try:
+        limit = int(max_symbols or DEFAULT_OUTLINE_SYMBOLS)
+    except (TypeError, ValueError):
+        limit = DEFAULT_OUTLINE_SYMBOLS
+    limit = max(1, min(limit, HARD_OUTLINE_SYMBOLS))
+
     lines = content.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # a trailing newline does not start a new line
+
     found: list[str] = []
+    matched = 0
     for number, line in enumerate(lines, start=1):
-        if len(found) >= max_symbols:
-            found.append(f"... more than {max_symbols} symbols; narrow the file range")
-            break
-        if any(regex.search(line) for regex in compiled):
-            text = line.rstrip()
-            if len(text) > 200:
-                text = text[:200] + " ..."
-            found.append(f"{number:6d}| {text}")
+        if not any(regex.search(line) for regex in compiled):
+            continue
+        matched += 1
+        if len(found) >= limit:
+            continue
+        text = line.rstrip()
+        if len(text) > 200:
+            text = text[:200] + " ..."
+        found.append(f"{number:6d}| {text}")
 
     header = f"Outline: {target} ({len(lines)} lines, {extension or 'no extension'})"
     if not found:
         return f"{header}\nNo declarations matched. Use Grep for a custom pattern."
-    return header + "\n" + "\n".join(found)
+    body = header + "\n" + "\n".join(found)
+    if matched > len(found):
+        body += (
+            f"\n... {matched - len(found):,} more declaration(s) hidden: showing "
+            f"{len(found):,} of {matched:,}. Raise max_results (hard cap "
+            f"{HARD_OUTLINE_SYMBOLS:,}) or use mode='grep' with a narrower pattern."
+        )
+    return body

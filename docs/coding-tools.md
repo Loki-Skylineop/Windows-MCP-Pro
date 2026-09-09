@@ -27,9 +27,15 @@ repository without a human at the keyboard.
   directory is reported and the command still runs from the default location.
 * **`session`** keeps the working directory and environment variables alive between
   calls, so `cd build` / `$env:FLAG='1'` survive to the next command.
-* **`timeout`** up to 3600 s. On timeout the child tree is killed, exit code `124`
-  is reported, **and the output produced so far is kept** - a hung build still tells
-  you where it hung.
+* **`timeout`** default 30 s and effectively capped at 55 s: MCP clients abort the
+  call at ~60 s while the command keeps running server-side, so a longer timeout
+  only guarantees the output is thrown away. A larger value is clamped with a note
+  pointing at `Job` (`WINDOWS_MCP_CLIENT_TIMEOUT` changes the ceiling, `0` disables
+  it). On timeout the child tree is killed, exit code `124` is reported, **and the
+  output produced so far is kept** - a hung build still tells you where it hung.
+* **Readable stderr.** Windows PowerShell 5.1 serialises a redirected error stream
+  as CLIXML. Text output is requested up front, any remaining CLIXML payload is
+  decoded, and the wrapper's own script echo is stripped from error records.
 * Console encoding is forced to UTF-8, so Cyrillic, emoji and box drawing survive.
 
 ## Edit
@@ -90,7 +96,9 @@ One edit can carry many hunks - the cheapest way to express a scattered change.
   largest files: the fastest way into an unfamiliar repository.
 * `mode='outline'` - declarations of one file (functions, classes, types, Markdown
   headings) with line numbers, so a 5,000-line file can be navigated without being
-  read in full.
+  read in full. Capped at `max_results` declarations (default 100, hard cap 2000),
+  with the number of hidden declarations reported, so a generated file cannot
+  flood the caller's context window.
 
 It runs in-process (no PowerShell start-up cost, no `ripgrep` install needed) and
 skips `.git`, `node_modules`, `__pycache__`, `.venv`, `dist`, `build`, `target`.

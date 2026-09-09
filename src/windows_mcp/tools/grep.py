@@ -26,7 +26,9 @@ _DESCRIPTION = (
     "mode='map': size/line totals for a tree, per-extension breakdown and the largest files - "
     "the fastest way to understand an unfamiliar repository.\n\n"
     "mode='outline': list the declarations (functions, classes, types, headings) of one file with "
-    "line numbers, so a 5,000-line file can be navigated without reading it all."
+    "line numbers, so a 5,000-line file can be navigated without reading it all. The list is "
+    "capped at 'max_results' declarations (default 100, hard cap 2000) and reports how many were "
+    "hidden, so a generated file cannot flood the context."
 )
 
 
@@ -66,7 +68,7 @@ def register(mcp, *, get_desktop, get_analytics):
         literal: Any = False,
         ignore_case: Any = False,
         context: int = 0,
-        max_results: int = 200,
+        max_results: int = None,
         multiline: Any = False,
         include_hidden: Any = False,
         top: int = 30,
@@ -79,7 +81,10 @@ def register(mcp, *, get_desktop, get_analytics):
             target = path or root
             if not target:
                 return "Error: 'path' is required for mode='outline'."
-            return grep_service.outline(_resolve(target))
+            return grep_service.outline(
+                _resolve(target),
+                max_symbols=int(max_results or grep_service.DEFAULT_OUTLINE_SYMBOLS),
+            )
 
         if action == "map":
             return grep_service.repo_map(

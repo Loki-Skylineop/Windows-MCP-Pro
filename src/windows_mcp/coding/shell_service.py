@@ -19,8 +19,13 @@ What this fixes compared to the plain ``PowerShell`` path
 5. **Partial output on timeout** - a timeout used to discard everything the
    command had already printed. Whatever was captured before the kill is now
    returned with a clear banner.
-6. **Long jobs** - the timeout ceiling is raised, and anything genuinely
-   long-running should use the ``Job`` tool instead.
+6. **Long jobs** - a large shell timeout is a trap: the MCP client gives up on
+   the call at ~60s while the command keeps running, so its output is lost for
+   good. Requests above ``CLIENT_TIMEOUT_CEILING`` are clamped with a note, and
+   anything genuinely long-running belongs in the ``Job`` tool.
+7. **Readable diagnostics** - Windows PowerShell 5.1 serialises a redirected
+   error stream as CLIXML. Text output is now requested up front, any remaining
+   CLIXML payload is decoded, and the harness's own script echo is stripped.
 """
 
 from __future__ import annotations
@@ -39,11 +44,24 @@ from platformdirs import user_data_dir
 
 from windows_mcp.powershell.utils import run_with_graceful_timeout
 
-__all__ = ["run", "ShellResult", "format_result", "SESSION_ROOT", "MAX_TIMEOUT"]
+__all__ = [
+    "run",
+    "ShellResult",
+    "format_result",
+    "SESSION_ROOT",
+    "MAX_TIMEOUT",
+    "CLIENT_TIMEOUT_CEILING",
+]
 
 SESSION_ROOT = os.path.join(user_data_dir("windows-mcp", appauthor=False), "shell-sessions")
 MAX_TIMEOUT = 3600
 DEFAULT_TIMEOUT = 30
+# MCP clients abort a tool call long before MAX_TIMEOUT - Notion drops the
+# request at ~60s while the command keeps running server-side, so everything it
+# printed is lost. A longer timeout is therefore clamped to this ceiling with an
+# explicit note pointing at the Job tool. Override with
+# WINDOWS_MCP_CLIENT_TIMEOUT (0 disables the clamp).
+CLIENT_TIMEOUT_CEILING = 55
 MAX_OUTPUT_CHARS = 200_000
 # Beyond this the encoded command no longer fits comfortably on a Windows
 # command line, so the script is written to a temp file and run with -File.
@@ -95,6 +113,22 @@ def _prepare_env() -> dict:
     return dict(os.environ)
 
 
+def _client_ceiling() -> int:
+    """Effective timeout ceiling; 0 means the clamp is disabled."""
+    raw = str(os.environ.get("WINDOWS_MCP_CLIENT_TIMEOUT", "") or "").strip()
+    if not raw:
+        return CLIENT_TIMEOUT_CEILING
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError):
+        return CLIENT_TIMEOUT_CEILING
+    return max(0, min(value, MAX_TIMEOUT))
+
+
+def _is_windows_powershell(shell: str) -> bool:
+    return os.path.basename(str(shell or "")).lower() in ("powershell", "powershell.exe")
+
+
 def _ps_literal(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
@@ -133,6 +167,91 @@ def _decode(blob: bytes | str | None) -> str:
         except UnicodeDecodeError:
             continue
     return blob.decode("utf-8", errors="replace")
+
+
+_CLIXML_MARKER = "#< CLIXML"
+_CLIXML_SEGMENT = re.compile(r"<S(?:\s+S=\"[^\"]*\")?>(.*?)</S>", re.DOTALL)
+_CLIXML_ESCAPE = re.compile(r"_x([0-9A-Fa-f]{4})_")
+_PS_CARET = re.compile(r"^\+\s*~+$")
+_PS_POSITION = re.compile(r"^(?:At line:\d+ char:\d+|\S+:\d+ \S+:\d+)$")
+
+
+def _unescape_clixml(fragment: str) -> str:
+    text = _CLIXML_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), fragment)
+    for entity, char in (
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", '"'),
+        ("&apos;", "'"),
+        ("&amp;", "&"),
+    ):
+        text = text.replace(entity, char)
+    return text
+
+
+def _decode_clixml(text: str) -> str:
+    """Turn PowerShell's ``#< CLIXML`` payload back into plain text.
+
+    Windows PowerShell 5.1 serialises the error stream as CLIXML as soon as it
+    is redirected, which turned every diagnostic into an unreadable XML blob.
+    """
+    if not text or _CLIXML_MARKER not in text:
+        return text
+    prefix, _, payload = text.partition(_CLIXML_MARKER)
+    segments = _CLIXML_SEGMENT.findall(payload)
+    if not segments:
+        return text
+    decoded = "".join(_unescape_clixml(item) for item in segments)
+    return (prefix + decoded).replace("\r\n", "\n").strip("\n")
+
+
+def _sanitise_stderr(text: str, script: str, command: str) -> str:
+    """Strip the harness's own script echo out of PowerShell error records.
+
+    PowerShell reports an error together with the offending source line, and
+    that line is frequently part of the wrapper (``exit $global:__wm_code``),
+    which leaks internals and tells the caller nothing. Lines that belong to
+    the user's command are kept untouched.
+    """
+    text = _decode_clixml(text or "")
+    if not text.strip():
+        return text
+    user_lines = {line.strip() for line in str(command or "").split("\n") if line.strip()}
+    wrapper = {
+        line.strip()
+        for line in str(script or "").split("\n")
+        if line.strip() and line.strip() not in user_lines
+    }
+    if not wrapper:
+        return text
+    wrapper_blob = "\n".join(sorted(wrapper))
+    kept: list[str] = []
+    for raw in text.split("\n"):
+        line = raw.rstrip("\r")
+        stripped = line.strip()
+        if not stripped:
+            kept.append(line)
+            continue
+        if stripped in wrapper:
+            continue
+        if _PS_CARET.match(stripped) or _PS_POSITION.match(stripped):
+            continue
+        if stripped.startswith("+ "):
+            echo = stripped[2:].strip().strip(".").strip()
+            if len(echo) >= 10 and echo in wrapper_blob:
+                continue
+        for prefix in wrapper:
+            marker = f"{prefix} : "
+            if stripped.startswith(marker):
+                line = stripped[len(marker):]
+                break
+        kept.append(line)
+    while kept and not kept[0].strip():
+        kept.pop(0)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    cleaned = "\n".join(kept)
+    return cleaned if cleaned.strip() else text
 
 
 def _clip(text: str) -> tuple[str, bool]:
@@ -183,6 +302,10 @@ def _argv(shell: str, script: str) -> tuple[list[str], str | None]:
     """Return the argv for *script*, falling back to a temp file when it is big."""
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     base = [shell, "-NoProfile", "-NonInteractive"]
+    if _is_windows_powershell(shell):
+        # Windows PowerShell 5.1 serialises a redirected error stream as CLIXML;
+        # asking for text output keeps diagnostics readable in the first place.
+        base = base + ["-OutputFormat", "Text"]
     if len(encoded) <= ENCODED_COMMAND_LIMIT:
         return base + ["-EncodedCommand", encoded], None
     handle = tempfile.NamedTemporaryFile(
@@ -222,6 +345,15 @@ def run(
     except (TypeError, ValueError):
         timeout = DEFAULT_TIMEOUT
     timeout = max(1, min(timeout, MAX_TIMEOUT))
+    ceiling = _client_ceiling()
+    if ceiling and timeout > ceiling:
+        result.notes.append(
+            f"timeout={timeout}s was clamped to {ceiling}s: the MCP client aborts the call at "
+            "~60s and everything the command printed would be thrown away. For longer work use "
+            "Job mode=start command=... (set WINDOWS_MCP_CLIENT_TIMEOUT to change this ceiling, "
+            "0 disables it)."
+        )
+        timeout = ceiling
 
     stored = _load_session(session)
     session_env = stored.get("env") if isinstance(stored.get("env"), dict) else {}
@@ -254,13 +386,15 @@ def run(
             check=False,
         )
         result.stdout = _decode(completed.stdout)
-        result.stderr = _decode(completed.stderr)
+        result.stderr = _sanitise_stderr(_decode(completed.stderr), script, str(command))
         result.exit_code = int(completed.returncode or 0)
     except subprocess.TimeoutExpired as exc:
         result.timed_out = True
         result.exit_code = _TIMEOUT_EXIT_CODE
         result.stdout = _decode(getattr(exc, "stdout", None))
-        result.stderr = _decode(getattr(exc, "stderr", None))
+        result.stderr = _sanitise_stderr(
+            _decode(getattr(exc, "stderr", None)), script, str(command)
+        )
         result.notes.append(
             f"Command exceeded the {timeout}s timeout and its process tree was killed. "
             "Partial output is preserved above. For long work use: Job mode=start command=..."

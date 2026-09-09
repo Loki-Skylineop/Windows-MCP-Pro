@@ -121,6 +121,39 @@ class TestOutline:
     def test_missing_file(self, tmp_path):
         assert grep_service.outline(str(tmp_path / "ghost.ts")).startswith("Error:")
 
+    def test_symbol_cap_reports_what_it_hid(self, tmp_path):
+        """Regression: an outline of a generated file used to flood the caller's context."""
+        path = tmp_path / "many.py"
+        path.write_text(
+            "\n".join(f"def fn_{index}():\n    pass" for index in range(120)),
+            encoding="utf-8",
+        )
+        out = grep_service.outline(str(path), max_symbols=10)
+        assert out.count("| def fn_") == 10
+        assert "more declaration(s) hidden" in out
+        assert "showing 10 of 120" in out
+
+    def test_default_cap_is_bounded(self, tmp_path):
+        path = tmp_path / "many.py"
+        path.write_text(
+            "\n".join(f"def fn_{index}():\n    pass" for index in range(500)),
+            encoding="utf-8",
+        )
+        out = grep_service.outline(str(path))
+        assert out.count("| def fn_") == grep_service.DEFAULT_OUTLINE_SYMBOLS
+        assert "hidden" in out
+
+    def test_cap_is_not_mentioned_when_everything_fits(self, tmp_path):
+        path = tmp_path / "small.py"
+        path.write_text("def only_one():\n    pass\n", encoding="utf-8")
+        out = grep_service.outline(str(path))
+        assert "hidden" not in out
+
+    def test_line_count_ignores_the_trailing_newline(self, tmp_path):
+        path = tmp_path / "two.py"
+        path.write_text("def a():\n    pass\n", encoding="utf-8")
+        assert "(2 lines," in grep_service.outline(str(path))
+
     def test_unknown_extension_uses_generic_patterns(self, tmp_path):
         path = tmp_path / "thing.unknown"
         path.write_text("function helper() {}\nnoise\n", encoding="utf-8")
