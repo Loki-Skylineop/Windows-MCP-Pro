@@ -15,6 +15,7 @@ adds the primitives a coding agent actually needs:
 * ``insert_before``  anchored insertion before an exact string
 * ``append`` / ``prepend``   add text to either end of a file
 * ``create``         create a new file without ever silently clobbering one
+* ``patch``          apply a unified diff, tolerating drifted line numbers
 
 Guarantees
 ----------
@@ -69,6 +70,7 @@ MODES = (
     "append",
     "prepend",
     "create",
+    "patch",
 )
 
 _ANCHORED = ("replace", "regex", "insert_after", "insert_before")
@@ -235,6 +237,106 @@ def _line_bounds(edit: dict, total: int, label: str) -> tuple[int, int] | str:
     return start, min(end, total)
 
 
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+# How far a hunk may sit from the line number in its own header and still be
+# applied: a diff is written against a snapshot, so by the time it arrives the
+# numbers are routinely stale and only the surrounding context identifies it.
+PATCH_FUZZ = 400
+
+
+def _parse_hunks(patch: str) -> list[dict] | str:
+    """Split a unified diff into hunks, or return a human-readable error."""
+    hunks: list[dict] = []
+    current: dict | None = None
+    for raw in patch.rstrip("\n").split("\n"):
+        if raw.startswith("@@"):
+            match = _HUNK_RE.match(raw)
+            if not match:
+                return (
+                    f"unrecognized hunk header {raw[:80]!r}; "
+                    "expected '@@ -old,count +new,count @@'"
+                )
+            current = {"start": int(match.group(1)), "before": [], "after": []}
+            hunks.append(current)
+            continue
+        if current is None:
+            # "diff --git", "index ...", "--- a/x", "+++ b/x": preamble, not content.
+            continue
+        if raw.startswith("\\"):
+            continue  # the "No newline at end of file" marker
+        if raw.startswith("-"):
+            current["before"].append(raw[1:])
+        elif raw.startswith("+"):
+            current["after"].append(raw[1:])
+        elif raw.startswith(" ") or raw == "":
+            # Plenty of tools strip the marker space from blank context lines.
+            body = raw[1:] if raw else ""
+            current["before"].append(body)
+            current["after"].append(body)
+        else:
+            return (
+                f"unrecognized diff line {raw[:80]!r}; every line inside a hunk must "
+                "start with ' ', '-' or '+'"
+            )
+    if not hunks:
+        return "no '@@' hunks found; pass a unified diff, e.g. from dry_run=true or `git diff`"
+    return hunks
+
+
+def _locate_hunk(lines: list[str], before: list[str], guess: int) -> int | None:
+    """Find where *before* sits in *lines*, searching outwards from *guess*."""
+    if not before:
+        return max(0, min(len(lines), guess))
+    span = len(before)
+    limit = len(lines) - span
+    if limit < 0:
+        return None
+    guess = max(0, min(guess, limit))
+    for delta in range(0, PATCH_FUZZ + 1):
+        for position in ((guess,) if delta == 0 else (guess + delta, guess - delta)):
+            if 0 <= position <= limit and lines[position:position + span] == before:
+                return position
+    return None
+
+
+def _hunk_hint(lines: list[str], before: list[str]) -> str:
+    """Point at the lines a failed hunk was probably aimed at."""
+    probe = next((line for line in before if line.strip()), "")
+    if not probe:
+        return ""
+    stripped = [line.strip() for line in lines]
+    spots = []
+    for candidate in difflib.get_close_matches(probe.strip(), stripped, n=3, cutoff=0.6):
+        try:
+            spots.append(str(stripped.index(candidate) + 1))
+        except ValueError:
+            continue
+    if spots:
+        return (
+            f" Context {probe.strip()[:60]!r} resembles line(s) {', '.join(spots)}; "
+            "regenerate the diff from a fresh `Edit mode=view`."
+        )
+    return " Re-read the file with `Edit mode=view` and regenerate the diff."
+
+
+def _apply_hunks(state: _FileState, hunks: list[dict], label: str) -> str | None:
+    """Apply every hunk in order, tracking the drift each one causes for the next."""
+    lines = state.text.split("\n")
+    drift = 0
+    for number, hunk in enumerate(hunks, start=1):
+        before = hunk["before"]
+        position = _locate_hunk(lines, before, hunk["start"] - 1 + drift)
+        if position is None:
+            return (
+                f"Error: {label}: hunk #{number} (@@ -{hunk['start']} @@) does not match "
+                f"the file.{_hunk_hint(lines, before)}"
+            )
+        lines[position:position + len(before)] = hunk["after"]
+        drift += len(hunk["after"]) - len(before)
+    state.text = "\n".join(lines)
+    return None
+
+
 def _apply_single(state: _FileState, edit: dict, index: int) -> str | None:
     mode = str(edit.get("mode") or "replace").strip().lower()
     label = f"edit #{index} ({mode}) on {state.path}"
@@ -319,6 +421,17 @@ def _apply_single(state: _FileState, edit: dict, index: int) -> str | None:
             state.text = state.text.replace(old, old + "\n" + block, times)
         else:
             state.text = state.text.replace(old, block + "\n" + old, times)
+
+    elif mode == "patch":
+        patch_text = edit.get("patch") or edit.get("diff") or new
+        if not str(patch_text).strip():
+            return f"Error: {label}: 'patch' is required (a unified diff with '@@' hunks)."
+        hunks = _parse_hunks(_normalize(str(patch_text)))
+        if isinstance(hunks, str):
+            return f"Error: {label}: {hunks}"
+        failure = _apply_hunks(state, hunks, label)
+        if failure:
+            return failure
 
     elif mode == "append":
         joiner = "" if not state.text or state.text.endswith("\n") else "\n"
