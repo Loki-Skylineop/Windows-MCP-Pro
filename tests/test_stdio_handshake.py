@@ -88,6 +88,15 @@ async def test_handshake_completes_and_lists_tools() -> None:
         tools = await asyncio.wait_for(client.list_tools(), STARTUP_TIMEOUT)
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
+async def test_every_description_carries_a_category_tag() -> None:
+    """Descriptions are tagged centrally, so a new tool cannot miss the tag."""
+    async with Client(_transport()) as client:
+        tools = await asyncio.wait_for(client.list_tools(), STARTUP_TIMEOUT)
+
+    tags = ("[coding]", "[web]", "[windows]", "[util]")
+    untagged = [tool.name for tool in tools if not (tool.description or "").startswith(tags)]
+
+    assert untagged == []
 
 
 async def test_tool_call_round_trips_over_stdio() -> None:
