@@ -2,7 +2,7 @@
 
 * :mod:`edit_service`  surgical, validated, atomic multi-file edits
 * :mod:`grep_service`  content search, repository maps and symbol outlines
-* :mod:`jobs_service`  detached background jobs for builds, installs and tests
+* :mod:`jobs_service`  background jobs for builds, installs and test runs
 * :mod:`shell_service` PowerShell with cwd, sessions, real exit codes and
   partial output on timeout
 
