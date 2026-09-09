@@ -22,7 +22,9 @@ _DESCRIPTION = (
     "~1-4s), returns title + url + snippet; "
     "'news' - same but recent news with dates; "
     "'images' / 'videos' - media results; "
-    "'read' - one URL to clean markdown without a browser (article text, menus stripped); "
+    "'books' - book and publication search; "
+    "'read' - URL to clean markdown without a browser (article text, menus stripped); "
+    "pass up to 5 comma-separated URLs to read them all in one call; "
     "'select' - structured extraction with CSS selectors, e.g. "
     "selectors='title=span.titleline > a::text; url=span.titleline > a::attr(href)'; "
     "'crawl' - headless Chromium for JavaScript-rendered pages, supports wait_for (CSS), "
@@ -33,7 +35,9 @@ _DESCRIPTION = (
     "(default 8), region (e.g. ru-ru, us-en, wt-wt), timelimit (d/w/m/y for recent only), "
     "backend (force one engine), max_chars (output budget, default 6000), timeout. "
     "Output is trimmed with an explicit hint rather than flooding the context, and block/"
-    "captcha pages are reported as such instead of being passed off as content."
+    "captcha pages are reported as such instead of being passed off as content. Repeat "
+    "read/select/crawl calls are served from a 10-minute in-process cache, so re-reading "
+    "a page you already fetched costs nothing."
 )
 
 

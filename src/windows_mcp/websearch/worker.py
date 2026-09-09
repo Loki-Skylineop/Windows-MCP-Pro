@@ -198,6 +198,11 @@ def do_videos(payload: dict) -> dict:
     return _search(payload, "videos")
 
 
+def do_books(payload: dict) -> dict:
+    """ddgs also indexes books/publications; parity with ddgs' own MCP server."""
+    return _search(payload, "books")
+
+
 def _fetch_html(url: str, timeout: int) -> tuple[str, str]:
     """Return (engine, html). Tries scrapling first, then plain urllib."""
     try:
@@ -232,11 +237,8 @@ def _html_to_text(html: str) -> str:
     return "\n".join(line.strip() for line in stripped.splitlines() if line.strip())
 
 
-def do_read(payload: dict) -> dict:
-    url = (payload.get("url") or "").strip()
-    if not url:
-        raise ValueError("mode=read requires a url")
-    timeout = int(payload.get("fetch_timeout") or 30)
+def _read_one(url: str, timeout: int) -> dict:
+    """Extract a single URL to markdown: trafilatura first, then HTML fallbacks."""
     tried: list[str] = []
 
     try:
@@ -294,6 +296,49 @@ def do_read(payload: dict) -> dict:
     }
 
 
+def do_read(payload: dict) -> dict:
+    """Read one URL, or several in a single worker run.
+
+    A batch replies with ``documents`` so the service can tell the two shapes
+    apart, and one unreachable page does not throw away the others.
+    """
+    urls = [str(item).strip() for item in (payload.get("urls") or []) if str(item).strip()]
+    if not urls:
+        single = (payload.get("url") or "").strip()
+        urls = [single] if single else []
+    if not urls:
+        raise ValueError("mode=read requires a url")
+
+    timeout = int(payload.get("fetch_timeout") or 30)
+
+    if len(urls) == 1:
+        return _read_one(urls[0], timeout)
+
+    # Sequential on purpose: the deadline is shared with the service, and a
+    # thread pool would make a partial failure much harder to read.
+    documents: list[dict] = []
+    for url in urls:
+        try:
+            documents.append(_read_one(url, timeout))
+        except Exception as exc:
+            documents.append(
+                {
+                    "url": url,
+                    "engine": "-",
+                    "text": "",
+                    "chars": 0,
+                    "blocked": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "tried": [],
+                }
+            )
+
+    return {
+        "engine": "batch",
+        "urls": urls,
+        "documents": documents,
+        "count": len(documents),
+    }
 def do_select(payload: dict) -> dict:
     url = (payload.get("url") or "").strip()
     if not url:
@@ -447,6 +492,7 @@ HANDLERS = {
     "news": do_news,
     "images": do_images,
     "videos": do_videos,
+    "books": do_books,
     "read": do_read,
     "select": do_select,
     "crawl": do_crawl,

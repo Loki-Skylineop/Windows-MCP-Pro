@@ -21,6 +21,15 @@ Design notes
   through ``validate_url``; dropping that would have let an agent reach the
   loopback interface or a metadata endpoint through the server's network
   position.
+* **Repeat fetches are cached.** An agent that reads a page, writes code, fails
+  and reads the same page again paid the full network cost every time - up to
+  55s when a browser crawl was involved. ``read``/``select``/``crawl`` replies
+  are cached in-process for ``WINDOWS_MCP_SEARCH_CACHE_TTL`` seconds (default
+  600). Search and news are never cached: freshness is the point of asking.
+* **``read`` accepts several URLs.** Reading the top three search hits used to
+  mean three subprocess spawns and three round trips through the model. A
+  comma-separated ``url`` fetches up to five pages in one worker run and splits
+  the character budget between them.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from windows_mcp.infrastructure.security import validate_url
@@ -41,11 +51,17 @@ WORKER_PATH = Path(__file__).with_name("worker.py")
 ENV_INTERPRETER = "WINDOWS_MCP_SEARCH_PYTHON"
 ENV_CLIENT_TIMEOUT = "WINDOWS_MCP_CLIENT_TIMEOUT"
 ENV_ALLOW_PRIVATE = "WINDOWS_MCP_SEARCH_ALLOW_PRIVATE"
+ENV_CACHE_TTL = "WINDOWS_MCP_SEARCH_CACHE_TTL"
 REQUIRED_MODULE = "ddgs"
 
-LIST_MODES = ("search", "news", "images", "videos")
+LIST_MODES = ("search", "news", "images", "videos", "books")
 TEXT_MODES = ("read", "crawl")
 URL_MODES = ("read", "crawl", "select")
+# Modes that take more than one URL per call.
+BATCH_MODES = ("read",)
+# Modes worth caching: the same page fetched again minutes later is almost
+# always the same page. Search and news are deliberately excluded.
+CACHE_MODES = ("read", "select", "crawl")
 MODES = LIST_MODES + TEXT_MODES + ("select", "env")
 
 DEFAULT_MAX_RESULTS = 8
@@ -53,6 +69,10 @@ HARD_MAX_RESULTS = 50
 DEFAULT_MAX_CHARS = 6000
 HARD_MAX_CHARS = 120000
 SNIPPET_LIMIT = 320
+# Five pages is what fits in one client deadline with room to spare.
+MAX_BATCH_URLS = 5
+DEFAULT_CACHE_TTL = 600
+CACHE_ENTRIES = 32
 
 # Same ceiling as the PowerShell tool: the MCP client gives up at ~60s.
 CLIENT_TIMEOUT_CEILING = 55
@@ -61,6 +81,7 @@ DEFAULT_TIMEOUT = {
     "news": 40,
     "images": 40,
     "videos": 40,
+    "books": 40,
     "read": 45,
     "select": 45,
     "crawl": 55,
@@ -452,6 +473,133 @@ def _validate_target(url: str) -> None:
         raise ValueError(f"refusing to fetch {url}: {exc}") from exc
 
 
+def _format_documents(reply: dict, max_chars: int, notes: list[str]) -> str:
+    """Render a batch read: several documents sharing one character budget."""
+    documents = reply.get("documents") or []
+    budget = max(200, max_chars // max(1, len(documents)))
+    lines = [
+        f"SearchPro mode=read urls={len(documents)} in {reply.get('elapsed', '?')}s "
+        f"budget={budget:,} chars per page"
+    ]
+    for index, document in enumerate(documents, start=1):
+        text = document.get("text") or ""
+        chars = int(document.get("chars") or len(text))
+        lines.append("")
+        lines.append(
+            f"--- [{index}/{len(documents)}] {document.get('url', '?')} "
+            f"engine={document.get('engine', '?')} chars={chars:,}"
+        )
+        if document.get("error"):
+            lines.append(f"failed: {document['error']}")
+            continue
+        if document.get("blocked"):
+            lines.append(
+                "WARNING: block/captcha page, not content; retry this one with mode=crawl."
+            )
+        body, trim_note = _trim(text, budget)
+        lines.append(body if body.strip() else "(empty document)")
+        if trim_note:
+            lines.append(trim_note)
+    if not documents:
+        lines.append("(no documents)")
+    lines.extend(notes)
+    return "\n".join(lines)
+
+
+# Fetch identity -> (stored_at, reply). A plain dict is insertion-ordered, so
+# the oldest entry is the first key. Process-local by design: the cache must
+# not outlive the server or leak between sessions.
+_cache: dict[str, tuple[float, dict]] = {}
+
+
+def parse_targets(url: object, mode: str) -> list[str]:
+    """Split *url* into fetch targets.
+
+    Only ``read`` splits on commas, and only when every piece looks like a URL -
+    a comma is legal inside a URL (``/a,b``), and silently fetching half of one
+    would be worse than not batching at all.
+    """
+    if url is None:
+        return []
+
+    if isinstance(url, (list, tuple)):
+        raw = [str(item) for item in url]
+    elif mode in BATCH_MODES:
+        pieces = [piece.strip() for piece in str(url).replace("\n", ",").split(",")]
+        pieces = [piece for piece in pieces if piece]
+        looks_like_urls = all(piece.lower().startswith(("http://", "https://")) for piece in pieces)
+        raw = pieces if len(pieces) > 1 and looks_like_urls else [str(url)]
+    else:
+        raw = [str(url)]
+
+    targets: list[str] = []
+    for item in raw:
+        candidate = item.strip().strip("<>").strip()
+        if candidate and candidate not in targets:
+            targets.append(candidate)
+
+    if len(targets) > 1 and mode not in BATCH_MODES:
+        raise ValueError(
+            f"mode={mode} takes a single url; only {', '.join(BATCH_MODES)} accepts a list"
+        )
+    if len(targets) > MAX_BATCH_URLS:
+        raise ValueError(
+            f"url lists are capped at {MAX_BATCH_URLS} pages per call, got {len(targets)}; "
+            "the client aborts the whole call at ~60s"
+        )
+    return targets
+
+
+def cache_ttl() -> int:
+    """Cache lifetime in seconds. Zero or negative disables the cache."""
+    raw = str(os.environ.get(ENV_CACHE_TTL, "") or "").strip()
+    if not raw:
+        return DEFAULT_CACHE_TTL
+    try:
+        return int(float(raw))
+    except ValueError:
+        return DEFAULT_CACHE_TTL
+
+
+def clear_cache() -> None:
+    """Drop every cached reply."""
+    _cache.clear()
+
+
+def _cache_key(payload: dict) -> str:
+    """Identity of a fetch: every argument that changes what comes back."""
+    parts = {
+        "mode": payload.get("mode"),
+        "urls": payload.get("urls") or payload.get("url"),
+        "selectors": payload.get("selectors"),
+        "js": payload.get("js"),
+        "wait_for": payload.get("wait_for"),
+        "focus": payload.get("focus"),
+        "scroll": payload.get("scroll"),
+        "clean": payload.get("clean"),
+    }
+    return json.dumps(parts, sort_keys=True, ensure_ascii=False)
+
+
+def _cache_get(key: str) -> tuple[dict, int] | None:
+    entry = _cache.get(key)
+    if entry is None:
+        return None
+    stored_at, reply = entry
+    age = int(time.time() - stored_at)
+    if age > cache_ttl():
+        _cache.pop(key, None)
+        return None
+    return dict(reply), age
+
+
+def _cache_put(key: str, reply: dict) -> None:
+    """Store a reply. Failures and partial (timed out) replies are not cached."""
+    if not reply.get("ok", False) or reply.get("timed_out"):
+        return
+    _cache[key] = (time.time(), dict(reply))
+    while len(_cache) > CACHE_ENTRIES:
+        _cache.pop(next(iter(_cache)))
 def run(
     *,
     mode: str = "search",
@@ -478,10 +626,12 @@ def run(
 
     if normalised in LIST_MODES and not (query or "").strip():
         raise ValueError(f"mode={normalised} requires query")
-    if normalised in URL_MODES and not (url or "").strip():
+
+    targets = parse_targets(url, normalised) if normalised in URL_MODES else []
+    if normalised in URL_MODES and not targets:
         raise ValueError(f"mode={normalised} requires url")
-    if normalised in URL_MODES:
-        _validate_target((url or "").strip())
+    for target in targets:
+        _validate_target(target)
 
     if timelimit and timelimit not in TIMELIMITS:
         raise ValueError(f"timelimit must be one of {', '.join(TIMELIMITS)}; got {timelimit!r}")
@@ -509,7 +659,8 @@ def run(
     payload = {
         "mode": normalised,
         "query": (query or "").strip() or None,
-        "url": (url or "").strip() or None,
+        "url": targets[0] if targets else None,
+        "urls": targets or None,
         "max_results": limit,
         "region": (region or "wt-wt").strip(),
         "timelimit": timelimit,
@@ -531,7 +682,19 @@ def run(
             'selectors="title=span.titleline > a::text; url=span.titleline > a::attr(href)"'
         )
 
-    reply = _run_worker(payload, effective_timeout)
+    cacheable = normalised in CACHE_MODES and cache_ttl() > 0
+    cache_key = _cache_key(payload) if cacheable else None
+    cached = _cache_get(cache_key) if cache_key else None
+    if cached is not None:
+        reply, age = cached
+        notes.append(
+            f"Note: served from cache, fetched {age}s ago. Change any argument or set "
+            f"{ENV_CACHE_TTL}=0 to force a refetch."
+        )
+    else:
+        reply = _run_worker(payload, effective_timeout)
+        if cache_key:
+            _cache_put(cache_key, reply)
 
     if reply.get("timed_out"):
         notes.append(f"Note: the worker hit the {effective_timeout}s deadline; output is partial.")
@@ -545,6 +708,8 @@ def run(
 
     if normalised in LIST_MODES:
         return _format_list(reply, normalised, notes)
+    if normalised in BATCH_MODES and reply.get("documents") is not None:
+        return _format_documents(reply, chars, notes)
     if normalised in TEXT_MODES:
         return _format_text(reply, normalised, chars, notes)
     if normalised == "select":

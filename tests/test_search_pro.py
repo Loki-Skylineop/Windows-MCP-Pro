@@ -57,6 +57,12 @@ def guarded_worker(monkeypatch):
 
     monkeypatch.setattr(search_service, "_run_worker", fake_run)
     return recorder
+@pytest.fixture(autouse=True)
+def _clean_cache():
+    """The read cache is process-global; no test may inherit another's entries."""
+    search_service.clear_cache()
+    yield
+    search_service.clear_cache()
 
 
 class TestArgumentValidation:
@@ -442,3 +448,246 @@ class TestSsrfGuard:
         guarded_worker.set_reply({"ok": True, "results": [], "engine": "ddgs:auto"})
         search_service.run(mode="search", query="windows mcp")
         assert len(guarded_worker.calls) == 1
+
+
+class TestReadCache:
+    """Re-reading a page an agent already fetched should not cost a fetch."""
+
+    def test_a_repeat_read_does_not_reach_the_worker(self, stub_worker):
+        stub_worker.set_reply({"ok": True, "text": "body", "url": "https://example.com"})
+
+        first = search_service.run(mode="read", url="https://example.com")
+        second = search_service.run(mode="read", url="https://example.com")
+
+        assert len(stub_worker.calls) == 1
+        assert "body" in first
+        assert "body" in second
+        assert "served from cache" in second
+
+    def test_different_selectors_are_a_different_document(self, stub_worker):
+        stub_worker.set_reply(
+            {"ok": True, "rows": [], "columns": [], "url": "https://example.com"}
+        )
+
+        search_service.run(mode="select", url="https://example.com", selectors="a=h1::text")
+        search_service.run(mode="select", url="https://example.com", selectors="b=h2::text")
+
+        assert len(stub_worker.calls) == 2
+
+    def test_search_results_are_never_cached(self, stub_worker):
+        """Freshness is the whole point of a search call."""
+        stub_worker.set_reply({"ok": True, "results": [], "engine": "ddgs:auto"})
+
+        search_service.run(mode="search", query="ruff release notes")
+        search_service.run(mode="search", query="ruff release notes")
+
+        assert len(stub_worker.calls) == 2
+
+    def test_the_cache_can_be_switched_off(self, stub_worker, monkeypatch):
+        monkeypatch.setenv(search_service.ENV_CACHE_TTL, "0")
+        stub_worker.set_reply({"ok": True, "text": "body", "url": "https://example.com"})
+
+        search_service.run(mode="read", url="https://example.com")
+        search_service.run(mode="read", url="https://example.com")
+
+        assert len(stub_worker.calls) == 2
+
+    def test_a_stale_entry_is_refetched(self, stub_worker):
+        stub_worker.set_reply({"ok": True, "text": "body", "url": "https://example.com"})
+        search_service.run(mode="read", url="https://example.com")
+
+        key = next(iter(search_service._cache))
+        stored_at, reply = search_service._cache[key]
+        search_service._cache[key] = (stored_at - search_service.DEFAULT_CACHE_TTL - 60, reply)
+
+        search_service.run(mode="read", url="https://example.com")
+
+        assert len(stub_worker.calls) == 2
+
+    def test_a_failed_reply_is_not_cached(self, stub_worker):
+        stub_worker.set_reply({"ok": False, "error": "nope"})
+
+        with pytest.raises(RuntimeError):
+            search_service.run(mode="read", url="https://example.com")
+
+        assert search_service._cache == {}
+
+    def test_the_cache_does_not_grow_without_bound(self, stub_worker):
+        stub_worker.set_reply({"ok": True, "text": "body"})
+
+        for index in range(search_service.CACHE_ENTRIES + 5):
+            search_service.run(mode="read", url=f"https://example.com/page{index}")
+
+        assert len(search_service._cache) == search_service.CACHE_ENTRIES
+
+
+class TestBatchRead:
+    def test_a_comma_separated_url_becomes_several_targets(self):
+        targets = search_service.parse_targets("https://a.example, https://b.example", "read")
+        assert targets == ["https://a.example", "https://b.example"]
+
+    def test_duplicates_collapse(self):
+        targets = search_service.parse_targets("https://a.example, https://a.example", "read")
+        assert targets == ["https://a.example"]
+
+    def test_a_url_that_contains_a_comma_is_not_split(self):
+        """Commas are legal inside a URL; half a URL is worse than no batch."""
+        assert search_service.parse_targets("https://example.com/a,b", "read") == [
+            "https://example.com/a,b"
+        ]
+
+    def test_only_read_accepts_a_list(self):
+        with pytest.raises(ValueError, match="takes a single url"):
+            search_service.parse_targets(["https://a.example", "https://b.example"], "crawl")
+
+    def test_the_batch_is_capped(self):
+        many = ", ".join(
+            f"https://host{index}.example" for index in range(search_service.MAX_BATCH_URLS + 1)
+        )
+        with pytest.raises(ValueError, match="capped at"):
+            search_service.parse_targets(many, "read")
+
+    def test_the_payload_carries_every_url(self, stub_worker):
+        stub_worker.set_reply({"ok": True, "documents": []})
+
+        search_service.run(mode="read", url="https://a.example, https://b.example")
+
+        payload = stub_worker.last_payload()
+        assert payload["urls"] == ["https://a.example", "https://b.example"]
+        assert payload["url"] == "https://a.example"
+
+    def test_every_url_in_a_batch_is_guarded(self, guarded_worker):
+        """Literal IPs only: the guard resolves hostnames and tests avoid DNS."""
+        with pytest.raises(ValueError, match="refusing to fetch"):
+            search_service.run(
+                mode="read", url="http://93.184.216.34/ok, http://169.254.169.254/meta"
+            )
+
+        assert guarded_worker.calls == []
+
+    def test_the_formatter_shows_every_document(self, stub_worker):
+        stub_worker.set_reply(
+            {
+                "ok": True,
+                "elapsed": 1.5,
+                "documents": [
+                    {
+                        "url": "https://a.example",
+                        "text": "alpha",
+                        "chars": 5,
+                        "engine": "trafilatura",
+                    },
+                    {
+                        "url": "https://b.example",
+                        "text": "",
+                        "chars": 0,
+                        "engine": "-",
+                        "error": "HTTPError: 404",
+                    },
+                ],
+            }
+        )
+
+        out = search_service.run(mode="read", url="https://a.example, https://b.example")
+
+        assert "[1/2] https://a.example" in out
+        assert "alpha" in out
+        assert "failed: HTTPError: 404" in out
+
+    def test_the_character_budget_is_split_between_pages(self, stub_worker):
+        long_text = "x" * 5000
+        stub_worker.set_reply(
+            {
+                "ok": True,
+                "documents": [
+                    {"url": "https://a.example", "text": long_text, "engine": "e"},
+                    {"url": "https://b.example", "text": long_text, "engine": "e"},
+                ],
+            }
+        )
+
+        out = search_service.run(
+            mode="read", url="https://a.example, https://b.example", max_chars=2000
+        )
+
+        assert "budget=1,000 chars per page" in out
+        assert "trimmed" in out
+
+
+class TestBooksMode:
+    def test_books_needs_a_query(self, stub_worker):
+        with pytest.raises(ValueError, match="requires query"):
+            search_service.run(mode="books")
+
+    def test_books_is_formatted_like_a_result_list(self, stub_worker):
+        stub_worker.set_reply(
+            {
+                "ok": True,
+                "engine": "ddgs:auto",
+                "results": [{"title": "SICP", "url": "https://example.com/sicp"}],
+            }
+        )
+
+        out = search_service.run(mode="books", query="structure and interpretation")
+
+        assert "mode=books" in out
+        assert "SICP" in out
+
+    def test_the_worker_maps_books_onto_the_ddgs_index(self, monkeypatch):
+        seen: dict[str, str] = {}
+
+        def fake_search(payload, kind):
+            seen["kind"] = kind
+            return {"results": []}
+
+        monkeypatch.setattr(worker, "_search", fake_search)
+        worker.do_books({"query": "x"})
+
+        assert seen["kind"] == "books"
+
+    def test_books_is_a_registered_worker_mode(self):
+        assert worker.HANDLERS["books"] is worker.do_books
+
+
+class TestWorkerBatchRead:
+    def test_several_urls_produce_documents(self, monkeypatch):
+        monkeypatch.setattr(
+            worker,
+            "_read_one",
+            lambda url, timeout: {"url": url, "text": f"body of {url}", "chars": 1},
+        )
+
+        reply = worker.do_read({"urls": ["https://a.example", "https://b.example"]})
+
+        assert [document["url"] for document in reply["documents"]] == [
+            "https://a.example",
+            "https://b.example",
+        ]
+        assert reply["count"] == 2
+
+    def test_one_broken_page_does_not_lose_the_others(self, monkeypatch):
+        def flaky(url, timeout):
+            if "b.example" in url:
+                raise RuntimeError("connection reset")
+            return {"url": url, "text": "ok", "chars": 2}
+
+        monkeypatch.setattr(worker, "_read_one", flaky)
+
+        reply = worker.do_read({"urls": ["https://a.example", "https://b.example"]})
+
+        assert reply["documents"][0]["text"] == "ok"
+        assert "connection reset" in reply["documents"][1]["error"]
+
+    def test_a_single_url_keeps_the_original_reply_shape(self, monkeypatch):
+        monkeypatch.setattr(
+            worker, "_read_one", lambda url, timeout: {"url": url, "text": "solo"}
+        )
+
+        assert worker.do_read({"url": "https://a.example"}) == {
+            "url": "https://a.example",
+            "text": "solo",
+        }
+
+    def test_read_still_requires_a_url(self):
+        with pytest.raises(ValueError, match="requires a url"):
+            worker.do_read({})
