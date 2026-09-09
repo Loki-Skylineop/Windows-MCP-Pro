@@ -35,7 +35,7 @@ repository keeps the MIT license and tracks upstream as a remote.
 | Tools exposed | 23 | **13** |
 | Target workload | click / type / screenshot | shell, files, code search, web |
 | File editing | `FileSystem write` (whole file) | `Edit` with 10 modes, backups, `expected_sha256`, `dry_run`, unified `patch` |
-| Code search | none | `Grep`: `grep` / `map` / `outline`, capped output |
+| Code search | none | `Grep`: `grep` / `map` / `outline` (Python parsed, not pattern-matched), capped output |
 | Version control | none | `Git`: `status` / `diff` / `log` / `commit` / `branch` / `info`, trimmed output |
 | Long commands | die at the request timeout | `Job`: `start` / `status` / `logs` / `stop` / `list` / `clean` |
 | Shell | unbounded timeout, raw CLIXML stderr | 55 s clamp + graceful stop, decoded stderr, persistent sessions |
@@ -732,6 +732,7 @@ All variables are optional unless noted. Set them via the `env` key in `claude_d
 | `WINDOWS_MCP_SEARCH_PYTHON` | _(auto-discovered)_ | Full path to the interpreter that holds the search stack (`ddgs`, `trafilatura`, `scrapling`, `crawl4ai`). Set it when discovery picks the wrong Python - `SearchPro mode=env` prints every candidate it tried and why it was rejected. |
 | `WINDOWS_MCP_SEARCH_ALLOW_PRIVATE` | _(disabled)_ | Set to `1`, `true`, `yes`, or `on` to let `read`/`select`/`crawl` reach private, loopback and link-local addresses. Off by default so a prompt-injected agent cannot read `http://127.0.0.1` or a cloud metadata endpoint through the server. |
 | `WINDOWS_MCP_CLIENT_TIMEOUT` | `55` | Shared ceiling in seconds for `PowerShell` and `SearchPro` timeouts, matching the ~60 s at which MCP clients abort a call. `0` disables the clamp. |
+| `WINDOWS_MCP_SEARCH_CACHE_TTL` | `600` | Seconds a fetched page stays in the in-memory cache used by `read`, `select` and `crawl` (32 entries, keyed by mode, URL and options). Re-reading the same page inside one task is then free. `0` disables caching. |
 
 ### Security
 
@@ -822,8 +823,14 @@ upstream GUI set was removed for exactly that reason (see
   `dry_run`, automatic backups, `expected_sha256` optimistic locking, and a `view`
   mode with line numbers. Preserves each file's encoding and line endings.
 - `Grep`: Code search in three shapes - `grep` (ripgrep-style with context),
-  `map` (repository tree with sizes) and `outline` (symbols per file). Results are
-  capped so a wide pattern cannot flood the context window.
+  `map` (repository tree with sizes) and `outline` (symbols per file). Python
+  files are outlined with the real Python parser: exact nesting (a method is
+  shown indented under its class), signatures collapsed onto one line even when
+  the source wraps them over five, line spans, decorators attached to what they
+  decorate, and no `def` from a docstring reported as code. Other languages use
+  pattern matching; a Python file that does not parse still gets an outline,
+  with a note saying the result is pattern-matched. Results are capped so a wide
+  pattern cannot flood the context window.
 - `Job`: Run long commands in the background and poll them - `start`, `status`,
   `logs` (with `tail`/`head`/`pattern`), `stop`, `list`, `clean`. This is how test
   suites, builds and installs run without hitting the request timeout.
@@ -841,11 +848,13 @@ upstream GUI set was removed for exactly that reason (see
 ### Web
 
 - `SearchPro`: Web search and page extraction in one tool - `search`, `news`,
-  `images`, `videos` (ddgs metasearch over brave/yandex/duckduckgo/bing/yahoo),
-  `read` (URL to clean markdown), `select` (CSS selectors to records), `crawl`
-  (headless Chromium with `wait_for`/`js`/`scroll`/`focus`) and `env`
-  (diagnostics). Runs out of process on the interpreter that owns the scraping
-  stack. See [docs/search-pro.md](docs/search-pro.md).
+  `images`, `videos`, `books` (ddgs metasearch over
+  brave/yandex/duckduckgo/bing/yahoo), `read` (URL to clean markdown, up to five
+  URLs in one call), `select` (CSS selectors to records), `crawl` (headless
+  Chromium with `wait_for`/`js`/`scroll`/`focus`) and `env` (diagnostics).
+  Fetched pages are cached for ten minutes, so re-reading the same URL inside
+  one task costs nothing. Runs out of process on the interpreter that owns the
+  scraping stack. See [docs/search-pro.md](docs/search-pro.md).
 
 ### Windows
 

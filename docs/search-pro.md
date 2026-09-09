@@ -66,7 +66,8 @@ pages that plain HTTP clients walk straight through.
 | `search` | `query` | numbered title / URL / snippet list |
 | `news` | `query` | same, with `date` and `source` |
 | `images`, `videos` | `query` | media URLs with dimensions / duration |
-| `read` | `url` | page as markdown, boilerplate stripped |
+| `books` | `query` | title, author, publisher and URL per hit |
+| `read` | `url` | page as markdown, boilerplate stripped; 1-5 URLs per call |
 | `select` | `url`, `selectors` | one row per record, columns you named |
 | `crawl` | `url` | JS-rendered markdown, `http=` status, link counts |
 | `env` | - | interpreter, package versions, live `ddgs` probe |
@@ -75,8 +76,8 @@ pages that plain HTTP clients walk straight through.
 
 | Argument | Applies to | Default | Notes |
 | --- | --- | --- | --- |
-| `query` | search/news/images/videos | - | required for those modes |
-| `url` | read/select/crawl | - | required for those modes |
+| `query` | search/news/images/videos/books | - | required for those modes |
+| `url` | read/select/crawl | - | required for those modes; `read` takes up to 5, separated by commas, spaces or newlines |
 | `max_results` | list modes, `select` | 8 | hard cap 50, clamp is reported |
 | `region` | list modes | `wt-wt` | `ru-ru`, `us-en`, ... |
 | `timelimit` | list modes | - | `d`/`w`/`m`/`y`, recent only |
@@ -96,6 +97,35 @@ Measured on this machine (same query, `region=ru-ru`):
 `google`, `mojeek` and `wikipedia` are dead through ddgs and are never retried.
 The default chain stops at the first backend that returns anything, and reports
 what it skipped (`Backends tried before this: ...`).
+
+### Caching
+
+`read`, `select` and `crawl` replies are cached in-process for
+`WINDOWS_MCP_SEARCH_CACHE_TTL` seconds (default 600, `0` disables it), 32
+entries, keyed by mode + URL + every argument that changes the output. An agent
+that reads a page, writes code, fails and reads the same page again used to pay
+the full network cost each time - up to 55 s when a browser crawl was involved.
+
+The cache is honest about itself: a served entry carries
+`Note: served from cache, fetched 42s ago.`, so a stale answer can never be
+mistaken for a fresh fetch. Failed and timed-out replies are never stored, and
+`search`/`news`/`images`/`videos`/`books` are never cached - freshness is the
+whole point of asking.
+
+### Batch read
+
+`read` accepts up to five URLs in one call:
+
+```jsonc
+{ "mode": "read", "url": "https://a.dev/docs, https://b.dev/api", "max_chars": 12000 }
+```
+
+They are fetched inside one worker run instead of one subprocess spawn plus one
+model round trip per page, which is the difference between reading the top three
+search hits in ~5 s and in ~20 s. Each page is returned under its own heading and
+shares the `max_chars` budget; if one URL dies it gets its own `failed: ...`
+line and the others still arrive. The other modes reject a list rather than
+silently reading the first URL.
 
 ## Guardrails
 

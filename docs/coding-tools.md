@@ -100,6 +100,39 @@ One edit can carry many hunks - the cheapest way to express a scattered change.
   with the number of hidden declarations reported, so a generated file cannot
   flood the caller's context window.
 
+### Python outlines are parsed, not pattern-matched
+
+`.py` and `.pyi` files go through the real Python parser (`ast`), so the outline
+is exact:
+
+```text
+    43| class GitError(RuntimeError)  [43-45]
+    58| def commit(message, *, paths=..., add_all=...) -> str  [58-121]
+    92|   def _fallback_identity() -> tuple  [92-99]
+```
+
+* Nesting is real: a method is indented under its class, a closure under its
+  function. The regex scanner could not tell a method from a module-level
+  function.
+* Signatures are collapsed onto one line even when the source wraps them over
+  five, and the return annotation is kept.
+* `[start-end]` is the line span, so `Edit mode=lines` or `mode=view` can jump
+  straight to the body.
+* Decorators are attached to what they decorate (`... @property`) instead of
+  being listed as separate symbols.
+* A `def` inside a docstring, a comment or a string is no longer reported as
+  code, and module- or class-level constants are listed while function locals
+  are not.
+* A file that does not parse - mid-edit, or Python 2 - still gets an outline
+  from the pattern scanner, prefixed with a note that says so and points at the
+  offending line. Silence would be worse than an approximate answer.
+
+Other languages keep the pattern scanner. tree-sitter would buy the same
+precision for TypeScript, Go and Rust, but it is a compiled dependency with a
+separate grammar wheel per language, and this server keeps its import graph
+small enough that no third-party package can stop it from starting - the same
+reason the search stack runs out of process.
+
 It runs in-process (no PowerShell start-up cost, no `ripgrep` install needed) and
 skips `.git`, `node_modules`, `__pycache__`, `.venv`, `dist`, `build`, `target`.
 

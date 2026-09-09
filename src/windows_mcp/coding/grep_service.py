@@ -18,6 +18,8 @@ import os
 import re
 import time
 
+from windows_mcp.coding import ast_outline
+
 __all__ = ["grep", "repo_map", "outline", "DEFAULT_SKIP_DIRS"]
 
 DEFAULT_SKIP_DIRS = frozenset({
@@ -323,6 +325,12 @@ def outline(
 ) -> str:
     """List the declarations in a source file with line numbers.
 
+    Python files (``.py``/``.pyi``) are parsed with the real Python parser, so
+    the nesting, the signatures and the line spans are exact and a ``def`` in a
+    docstring is not mistaken for code. Every other language falls back to
+    pattern matching. A Python file that does not parse is still outlined, with
+    a note saying the result is pattern-matched.
+
     The cap is load-bearing: an outline of a generated 5,000-line file can
     otherwise return thousands of declarations and blow up the caller's
     context window. Anything hidden is reported as a count, so the caller
@@ -332,8 +340,6 @@ def outline(
     if not os.path.isfile(target):
         return f"Error: file not found: {target}"
     extension = os.path.splitext(target)[1].lower()
-    patterns = _SYMBOL_PATTERNS.get(extension, _GENERIC_PATTERNS)
-    compiled = [re.compile(item) for item in patterns]
     try:
         with open(target, "r", encoding=encoding, errors="replace") as handle:
             content = handle.read()
@@ -350,6 +356,28 @@ def outline(
     if lines and lines[-1] == "":
         lines.pop()  # a trailing newline does not start a new line
 
+    note = ""
+    if extension in ast_outline.SUPPORTED_SUFFIXES:
+        try:
+            symbols = ast_outline.outline(content)
+        except SyntaxError as exc:
+            note = (
+                f"Note: this file does not parse (line {exc.lineno or '?'}: {exc.msg}), "
+                "so the list below is pattern-matched and may be wrong."
+            )
+        except (RecursionError, ValueError, MemoryError) as exc:
+            note = (
+                f"Note: the Python parser gave up ({type(exc).__name__}), "
+                "so the list below is pattern-matched."
+            )
+        else:
+            header = f"Outline: {target} ({len(lines)} lines, {extension}, python ast)"
+            rows = [_format_symbol(item) for item in symbols[:limit]]
+            return _finish_outline(header, rows, len(symbols))
+
+    patterns = _SYMBOL_PATTERNS.get(extension, _GENERIC_PATTERNS)
+    compiled = [re.compile(item) for item in patterns]
+
     found: list[str] = []
     matched = 0
     for number, line in enumerate(lines, start=1):
@@ -364,13 +392,31 @@ def outline(
         found.append(f"{number:6d}| {text}")
 
     header = f"Outline: {target} ({len(lines)} lines, {extension or 'no extension'})"
-    if not found:
+    if note:
+        header = f"{header}\n{note}"
+    return _finish_outline(header, found, matched)
+
+
+def _format_symbol(symbol: ast_outline.Symbol) -> str:
+    """Render one parsed symbol: indent by nesting depth, append the line span."""
+    text = symbol.text
+    if symbol.end_line > symbol.line:
+        text = f"{text}  [{symbol.line}-{symbol.end_line}]"
+    text = "  " * symbol.depth + text
+    if len(text) > 240:
+        text = text[:240] + " ..."
+    return f"{symbol.line:6d}| {text}"
+
+
+def _finish_outline(header: str, rows: list[str], matched: int) -> str:
+    """Join the rows and, when the cap bit, say exactly what was hidden."""
+    if not rows:
         return f"{header}\nNo declarations matched. Use Grep for a custom pattern."
-    body = header + "\n" + "\n".join(found)
-    if matched > len(found):
+    body = header + "\n" + "\n".join(rows)
+    if matched > len(rows):
         body += (
-            f"\n... {matched - len(found):,} more declaration(s) hidden: showing "
-            f"{len(found):,} of {matched:,}. Raise max_results (hard cap "
+            f"\n... {matched - len(rows):,} more declaration(s) hidden: showing "
+            f"{len(rows):,} of {matched:,}. Raise max_results (hard cap "
             f"{HARD_OUTLINE_SYMBOLS:,}) or use mode='grep' with a narrower pattern."
         )
     return body

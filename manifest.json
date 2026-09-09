@@ -76,7 +76,7 @@
     },
     {
       "name": "Grep",
-      "description": "Code search over a directory tree. mode=grep finds regex or literal matches with context, mode=map gives a file and directory overview, mode=outline lists the symbols of a single file. Output is capped so a wide pattern cannot flood the context window."
+      "description": "Code search over a directory tree. mode=grep finds regex or literal matches with context, mode=map gives a file and directory overview, mode=outline lists the symbols of a single file - Python files are parsed with the real Python parser, so nesting, signatures and line spans are exact. Output is capped so a wide pattern cannot flood the context window."
     },
     {
       "name": "Job",
