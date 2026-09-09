@@ -1,0 +1,130 @@
+# Coding tools
+
+Windows-MCP was built to drive a Windows *desktop*. These four tools make the same
+server usable as a **coding** backend: reading, searching, editing and building a
+repository without a human at the keyboard.
+
+| Tool | Replaces | Why it exists |
+| --- | --- | --- |
+| `PowerShell` | the old fire-and-forget shell | real exit codes, stderr, a working directory, reusable sessions, partial output on timeout |
+| `Edit` | `FileSystem write` | surgical edits with validation, backups and atomic writes - never rewrite a file to change three lines |
+| `Grep` | `FileSystem search` (names only) | search file *contents*, map a repository, outline one file |
+| `Job` | nothing | anything slower than a request timeout: installs, builds, test suites |
+
+---
+
+## PowerShell
+
+```jsonc
+{ "command": "pytest -q", "cwd": "C:/src/app", "session": "build", "timeout": 600 }
+```
+
+* **Real exit code.** The wrapper captures `$LASTEXITCODE` / `$?` and reports it; a
+  failing command is a *result*, not an exception, so `isError` stays reserved for
+  the transport actually breaking.
+* **Both streams.** stdout and stderr are returned together, in order.
+* **`cwd`** runs the command elsewhere without `cd &&` gymnastics. A missing
+  directory is reported and the command still runs from the default location.
+* **`session`** keeps the working directory and environment variables alive between
+  calls, so `cd build` / `$env:FLAG='1'` survive to the next command.
+* **`timeout`** up to 3600 s. On timeout the child tree is killed, exit code `124`
+  is reported, **and the output produced so far is kept** - a hung build still tells
+  you where it hung.
+* Console encoding is forced to UTF-8, so Cyrillic, emoji and box drawing survive.
+
+## Edit
+
+`mode='view'` first (it prints size, line count, EOL, encoding and sha256), then
+`mode='apply'` with a batch of edits.
+
+```jsonc
+{ "edits": [
+  { "file": "src/app.ts", "mode": "replace", "old": "const port = 3000", "new": "const port = 8080" },
+  { "file": "src/app.ts", "mode": "insert_after", "old": "import http", "new": "import https" },
+  { "file": "README.md", "mode": "append", "new": "\n## Changelog\n" }
+]}
+```
+
+Modes: `replace` (default), `regex`, `lines`, `delete_lines`, `insert_after`,
+`insert_before`, `append`, `prepend`, `create`, `patch`.
+
+Guarantees:
+
+* **All-or-nothing.** Every edit in the batch is applied to an in-memory copy and
+  validated first. One bad anchor and *nothing* is written, across all files.
+* **Atomic writes.** Content goes to a temp file, is fsynced, then `os.replace`d -
+  no half-written source files if the process dies mid-write.
+* **Backups.** Each modified file is copied to
+  `%LOCALAPPDATA%\windows-mcp\edit-backups\<timestamp>-<name>-<digest>.bak`.
+* **Encoding fidelity.** CRLF vs LF and a UTF-8 BOM are detected and restored.
+* **`expected_sha256`** is a compare-and-swap guard: if the file changed on disk
+  since it was read, the edit is refused instead of clobbering someone's work.
+* **`dry_run: true`** returns a unified diff and writes nothing.
+* Failed matches report the nearest lines and whether the difference is only
+  whitespace, so the retry can be exact.
+
+### mode='patch' - unified diffs
+
+```jsonc
+{ "edits": [{ "file": "src/app.ts", "mode": "patch", "patch": "@@ -12,3 +12,4 @@\n context\n-old line\n+new line\n+added line\n" }] }
+```
+
+One edit can carry many hunks - the cheapest way to express a scattered change.
+
+* Hunks are located by their **context**, searching outwards from the header
+  position (up to `PATCH_FUZZ = 400` lines). Line numbers in `@@` headers are stale
+  the moment anything above them moves, so they are treated as a hint, not a fact.
+* Drift introduced by earlier hunks is carried into the search for later ones.
+* `diff --git`, `index`, `---`, `+++` preamble and `\ No newline at end of file`
+  are ignored, so output from `git diff` can be pasted in unchanged.
+* A hunk that does not match aborts the whole batch and reports which lines it was
+  probably aimed at. Re-applying an already-applied diff therefore fails loudly
+  instead of corrupting the file.
+
+## Grep
+
+* `mode='grep'` (default) - regex or `literal=true` search under `root`, with
+  `glob='*.py,*.ts'`, `context=N`, `ignore_case`, `multiline`, `max_results`.
+  Output is `path:line: text`, ready to paste straight into an `Edit` anchor.
+* `mode='map'` - size and line totals for a tree, per-extension breakdown and the
+  largest files: the fastest way into an unfamiliar repository.
+* `mode='outline'` - declarations of one file (functions, classes, types, Markdown
+  headings) with line numbers, so a 5,000-line file can be navigated without being
+  read in full.
+
+It runs in-process (no PowerShell start-up cost, no `ripgrep` install needed) and
+skips `.git`, `node_modules`, `__pycache__`, `.venv`, `dist`, `build`, `target`.
+
+## Job
+
+```jsonc
+{ "mode": "start", "command": "npm run build", "cwd": "C:/src/app", "name": "build" }
+{ "mode": "status" }                      // most recent job
+{ "mode": "logs", "tail": 40 }            // or head=N, or pattern=REGEX
+{ "mode": "stop", "job_id": "last" }      // kills the whole process tree
+```
+
+* Output is streamed line by line to a UTF-8 log, so it can be grepped **while the
+  job is still running**.
+* State lives on disk (`%LOCALAPPDATA%\windows-mcp\jobs\<id>\` holds `command.ps1`,
+  `output.log`, `exit.code`, `meta.json`), so jobs survive a server restart.
+* `job_id` accepts a full id, a unique prefix, or `last`.
+* Jobs are started in a new process group with no console window - they are
+  *backgrounded*, not detached, so killing a job kills its children too.
+* A command that dies instantly without output is reported as an error rather than
+  as a silently "finished" job.
+
+---
+
+## Running the tests
+
+```powershell
+$env:PYTHONPATH = "<repo>\src;<deps>\Lib\site-packages"
+uv run --no-project --with pytest --with pytest-asyncio --python 3.12 `
+  python -m pytest tests -q -p no:cacheprovider
+```
+
+The coding tools have their own suites: `tests/test_coding_edit.py`,
+`tests/test_coding_patch.py`, `tests/test_coding_grep.py`,
+`tests/test_coding_jobs.py`. `tests/test_stdio_handshake.py` guards the exact set
+of registered tools - add a tool, update that set.
