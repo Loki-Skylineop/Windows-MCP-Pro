@@ -82,6 +82,7 @@ class TestCategoryTags:
         mapping = categories()
         assert mapping["edit"] == "coding"
         assert mapping["grep"] == "coding"
+        assert mapping["git"] == "coding"
         assert mapping["search"] == "web"
         assert mapping["registry"] == "windows"
         assert mapping["wait"] == "util"

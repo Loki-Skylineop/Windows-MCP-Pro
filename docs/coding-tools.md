@@ -122,6 +122,38 @@ skips `.git`, `node_modules`, `__pycache__`, `.venv`, `dist`, `build`, `target`.
 * A command that dies instantly without output is reported as an error rather than
   as a silently "finished" job.
 
+## Git
+
+```jsonc
+{ "mode": "status", "path": "C:/src/app" }
+{ "mode": "diff", "path": "C:/src/app", "max_lines": 120 }   // --stat + trimmed patch
+{ "mode": "log", "path": "C:/src/app", "limit": 10, "pattern": "fix" }
+{ "mode": "commit", "path": "C:/src/app", "message": "fix: null guard" }
+{ "mode": "branch", "path": "C:/src/app", "name": "spike", "create": true }
+{ "mode": "info", "path": "C:/src/app" }
+```
+
+`PowerShell` can already run git, so this tool only exists for the three things
+that go wrong when it does:
+
+* **Output budget.** A real `git diff` is thousands of lines and all of them land
+  in the model's context. `mode='diff'` always leads with `--stat` and trims the
+  patch to `max_lines` (default 200, hard cap 4000), saying how much it hid.
+  `status` caps the file list, `log` caps at 200 commits.
+* **The identity trap.** A fresh Windows box has no `user.email`, so the first
+  commit an agent attempts dies with *Author identity unknown* - the work is
+  done and nothing is saved. `mode='commit'` retries with the previous commit's
+  author, falls back to `windows-mcp <windows-mcp@localhost>`, and says which
+  identity it used.
+* **One question, one call.** `mode='info'` answers "which repositories do I
+  have and is GitHub connected?" in a single result: git version, configured
+  identity, current repo with branch/remotes/dirty count, `gh auth status`, and
+  other repositories found within two directory levels (repositories are never
+  descended into, `node_modules` and friends are skipped).
+
+`push`, `reset`, `rebase`, `cherry-pick` and anything else that rewrites history
+or touches a remote are **deliberately not exposed**. They stay in `PowerShell`,
+where the exact command is visible before it runs.
 ---
 
 ## Running the tests
@@ -134,5 +166,6 @@ uv run --no-project --with pytest --with pytest-asyncio --python 3.12 `
 
 The coding tools have their own suites: `tests/test_coding_edit.py`,
 `tests/test_coding_patch.py`, `tests/test_coding_grep.py`,
-`tests/test_coding_jobs.py`. `tests/test_stdio_handshake.py` guards the exact set
+`tests/test_coding_jobs.py`, `tests/test_git_tool.py`.
+`tests/test_stdio_handshake.py` guards the exact set
 of registered tools - add a tool, update that set.

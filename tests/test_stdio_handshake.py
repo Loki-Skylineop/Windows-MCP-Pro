@@ -48,6 +48,7 @@ EXPECTED_TOOLS = {
     "Clipboard",
     "Edit",
     "FileSystem",
+    "Git",
     "Grep",
     "Job",
     "Notification",

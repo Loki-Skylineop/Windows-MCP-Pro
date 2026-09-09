@@ -3,7 +3,7 @@
   "name": "Windows-MCP-Pro",
   "version": "0.8.5",
   "description": "Coding-agent MCP server for Windows: shell, files, code search and web research",
-  "long_description": "Windows-MCP Pro is a fork of CursorTouch/Windows-MCP v0.8.5, aimed at coding agents instead of GUI automation.\n\n**WHAT IS DIFFERENT**\n- **12 tools, not 23.** The eleven GUI tools (Snapshot, Screenshot, Click, Type, Scroll, Move, Shortcut, MultiSelect, MultiEdit, DisplayInventory, WaitFor) were removed: their schemas cost roughly 14,000 characters of context on every request and a coding agent never calls them.\n- **Coding tools.** Surgical Edit (replace, regex, line ranges, patches, sha256 guards, backups), Grep (grep / map / outline), Job for background processes with logs, and persistent PowerShell sessions.\n- **SearchPro replaces Scrape.** Metasearch across Brave, Yandex, DuckDuckGo, Bing and Yahoo, plus article extraction, CSS scraping and a headless crawler - running out of process so its dependencies cannot break the server.\n- **Hardened.** Timeouts clamped below the ~60s client abort, bounded tool output, CLIXML stderr decoding, and SSRF-checked fetch targets.\n\n**MINIMUM REQUIREMENTS**\n- **Python 3.14+**\n- **Windows 10 or 11**\n",
+  "long_description": "Windows-MCP Pro is a fork of CursorTouch/Windows-MCP v0.8.5, aimed at coding agents instead of GUI automation.\n\n**WHAT IS DIFFERENT**\n- **13 tools, not 23.** The eleven GUI tools (Snapshot, Screenshot, Click, Type, Scroll, Move, Shortcut, MultiSelect, MultiEdit, DisplayInventory, WaitFor) were removed: their schemas cost roughly 14,000 characters of context on every request and a coding agent never calls them.\n- **Coding tools.** Surgical Edit (replace, regex, line ranges, patches, sha256 guards, backups), Grep (grep / map / outline), Job for background processes with logs, and persistent PowerShell sessions.\n- **SearchPro replaces Scrape.** Metasearch across Brave, Yandex, DuckDuckGo, Bing and Yahoo, plus article extraction, CSS scraping and a headless crawler - running out of process so its dependencies cannot break the server.\n- **Hardened.** Timeouts clamped below the ~60s client abort, bounded tool output, CLIXML stderr decoding, and SSRF-checked fetch targets.\n\n**MINIMUM REQUIREMENTS**\n- **Python 3.14+**\n- **Windows 10 or 11**\n",
   "author": {
     "name": "Loki-Skylineop",
     "url": "https://github.com/Loki-Skylineop"
@@ -85,6 +85,10 @@
     {
       "name": "FileSystem",
       "description": "File and folder operations: read, write, copy, move, delete, list, search, info."
+    },
+    {
+      "name": "Git",
+      "description": "Git for a local repository: mode=status groups changed files by stage, mode=diff prints a --stat summary plus a trimmed patch, mode=log lists recent commits, mode=commit stages and commits (reusing the last commit's author when the machine has no git identity), mode=branch lists or switches branches, mode=info reports the current repository, its remotes, whether the GitHub CLI is logged in, and other repositories nearby. Push, reset and rebase are deliberately not exposed."
     },
     {
       "name": "SearchPro",

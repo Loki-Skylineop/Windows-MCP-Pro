@@ -6,8 +6,8 @@
   </a>
   <img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%2010%E2%80%9311-blue" alt="Platform">
-  <img src="https://img.shields.io/badge/tools-12-blue" alt="12 tools">
-  <img src="https://img.shields.io/badge/tests-712%20passing-brightgreen" alt="712 tests passing">
+  <img src="https://img.shields.io/badge/tools-13-blue" alt="13 tools">
+  <img src="https://img.shields.io/badge/tests-780%20passing-brightgreen" alt="780 tests passing">
 
   <p><b>A coding-agent fork of <a href="https://github.com/CursorTouch/Windows-MCP">CursorTouch/Windows-MCP</a> v0.8.5</b></p>
 
@@ -32,15 +32,16 @@ repository keeps the MIT license and tracks upstream as a remote.
 
 | | Upstream v0.8.5 | Windows-MCP Pro |
 | --- | --- | --- |
-| Tools exposed | 23 | **12** |
+| Tools exposed | 23 | **13** |
 | Target workload | click / type / screenshot | shell, files, code search, web |
 | File editing | `FileSystem write` (whole file) | `Edit` with 10 modes, backups, `expected_sha256`, `dry_run`, unified `patch` |
 | Code search | none | `Grep`: `grep` / `map` / `outline`, capped output |
+| Version control | none | `Git`: `status` / `diff` / `log` / `commit` / `branch` / `info`, trimmed output |
 | Long commands | die at the request timeout | `Job`: `start` / `status` / `logs` / `stop` / `list` / `clean` |
 | Shell | unbounded timeout, raw CLIXML stderr | 55 s clamp + graceful stop, decoded stderr, persistent sessions |
 | Web | `Scrape` (one URL, via MCP sampling most clients don't implement) | `SearchPro`: metasearch + article extraction + CSS scraping + headless crawl |
 | GUI automation | 11 tools | removed on purpose |
-| Tests | 676 | **712** |
+| Tests | 676 | **780** |
 
 ### Fixes made on top of upstream
 
@@ -109,7 +110,7 @@ SearchPro mode=crawl   url=https://example.com/spa  wait_for="css:.results"
 ## ✨ Key Features
 
 - **Built for coding agents**
-  Twelve tools: a hardened shell with persistent sessions, surgical file edits,
+  Thirteen tools: a hardened shell with persistent sessions, surgical file edits,
   code search, a background job runner, and web research. No pixel pushing.
 
 - **Context treated as a budget**
@@ -506,7 +507,7 @@ npm install -g @anthropic-ai/claude-code
 
 ## 🖥️ Running the server
 
-The server runs on your Windows machine and exposes its 12 tools to the
+The server runs on your Windows machine and exposes its 13 tools to the
 connected MCP client.
 
 ```shell
@@ -801,10 +802,10 @@ Remote (with auth + IP allowlist + TLS):
 
 ## 🔨MCP Tools
 
-Windows-MCP Pro exposes **12 tools**. Every tool schema is re-sent to the model on
+Windows-MCP Pro exposes **13 tools**. Every tool schema is re-sent to the model on
 *every* request, so the tool list is a context budget, not a feature list - the
 upstream GUI set was removed for exactly that reason (see
-[Why 12 tools](#why-12-tools)).
+[Why 13 tools](#why-13-tools)).
 
 ### Coding
 
@@ -823,6 +824,14 @@ upstream GUI set was removed for exactly that reason (see
   suites, builds and installs run without hitting the request timeout.
 - `FileSystem`: Read, write, copy, move, delete, list, search and inspect files
   and directories.
+- `Git`: Repository work without shelling out - `status` (changed files grouped
+  by stage), `diff` (a `--stat` summary plus a patch trimmed to `max_lines`),
+  `log`, `commit` (stages, then falls back to the previous commit's author when
+  the machine has no git identity, so work is never lost to "Author identity
+  unknown"), `branch` (list, switch, create) and `info` (git version, remotes,
+  whether the GitHub CLI is logged in, and other repositories found nearby).
+  `push`, `reset` and `rebase` are deliberately absent - run those through
+  `PowerShell`, where the exact command is visible first.
 
 ### Web
 
@@ -844,7 +853,7 @@ upstream GUI set was removed for exactly that reason (see
 - `Wait`: Pause for a defined duration (clamped to 45 s) - useful when something
   outside the agent's control needs a moment to settle.
 
-### Why 12 tools
+### Why 13 tools
 
 These eleven upstream tools are **not** in this fork: `Snapshot`, `Screenshot`,
 `Click`, `Type`, `Scroll`, `Move`, `Shortcut`, `MultiSelect`, `MultiEdit`,
@@ -855,7 +864,7 @@ want desktop/UI automation, use
 [upstream Windows-MCP](https://github.com/CursorTouch/Windows-MCP) - this fork is
 deliberately the other half of the problem.
 
-`--tools` / `--exclude-tools` still work, so you can narrow the 12 further per
+`--tools` / `--exclude-tools` still work, so you can narrow the 13 further per
 client.
 
 
