@@ -41,6 +41,21 @@ def stub_worker(monkeypatch):
         return dict(recorder.reply)
 
     monkeypatch.setattr(search_service, "_run_worker", fake_run)
+    # The SSRF guard resolves hostnames; these tests must never need DNS.
+    monkeypatch.setattr(search_service, "_validate_target", lambda url: None)
+    return recorder
+
+
+@pytest.fixture
+def guarded_worker(monkeypatch):
+    """Same subprocess stub, but the real SSRF guard stays in place."""
+    recorder = _WorkerRecorder()
+
+    def fake_run(payload, timeout):
+        recorder.calls.append({"payload": payload, "timeout": timeout})
+        return dict(recorder.reply)
+
+    monkeypatch.setattr(search_service, "_run_worker", fake_run)
     return recorder
 
 
@@ -367,3 +382,63 @@ class TestWorkerEntryPoint:
 
         assert code == 0
         assert reply["ok"] is True
+
+
+class TestSsrfGuard:
+    """SearchPro must not become an SSRF hole now that Scrape is gone.
+
+    Upstream ran every scraped URL through ``validate_url``. Replacing the tool
+    without that check would let a prompt-injected agent read
+    ``http://127.0.0.1`` or a cloud metadata endpoint through the server's own
+    network position. Literal IPs are used throughout so these tests stay
+    offline.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1:8000/health",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.5/internal",
+        ],
+    )
+    def test_private_targets_are_refused(self, url, monkeypatch):
+        monkeypatch.delenv("WINDOWS_MCP_SEARCH_ALLOW_PRIVATE", raising=False)
+        with pytest.raises(ValueError, match="refusing to fetch"):
+            search_service._validate_target(url)
+
+    def test_non_http_schemes_are_refused(self, monkeypatch):
+        monkeypatch.delenv("WINDOWS_MCP_SEARCH_ALLOW_PRIVATE", raising=False)
+        with pytest.raises(ValueError, match="not allowed"):
+            search_service._validate_target("file:///C:/Users/me/.ssh/id_rsa")
+
+    def test_embedded_credentials_are_refused(self, monkeypatch):
+        monkeypatch.delenv("WINDOWS_MCP_SEARCH_ALLOW_PRIVATE", raising=False)
+        with pytest.raises(ValueError, match="credentials"):
+            search_service._validate_target("https://user:secret@example.com/")
+
+    def test_the_env_flag_allows_a_local_dev_server(self, monkeypatch):
+        monkeypatch.setenv("WINDOWS_MCP_SEARCH_ALLOW_PRIVATE", "1")
+        search_service._validate_target("http://127.0.0.1:8000/health")
+
+    def test_run_refuses_before_spawning_the_worker(self, guarded_worker, monkeypatch):
+        monkeypatch.delenv("WINDOWS_MCP_SEARCH_ALLOW_PRIVATE", raising=False)
+        with pytest.raises(ValueError, match="refusing to fetch"):
+            search_service.run(mode="read", url="http://169.254.169.254/latest/meta-data/")
+        assert guarded_worker.calls == []
+
+    @pytest.mark.parametrize("mode", ["read", "select", "crawl"])
+    def test_every_url_mode_is_guarded(self, mode, guarded_worker, monkeypatch):
+        monkeypatch.delenv("WINDOWS_MCP_SEARCH_ALLOW_PRIVATE", raising=False)
+        with pytest.raises(ValueError, match="refusing to fetch"):
+            search_service.run(
+                mode=mode,
+                url="http://127.0.0.1:9/x",
+                selectors="title=h1::text",
+            )
+        assert guarded_worker.calls == []
+
+    def test_search_mode_needs_no_url_check(self, guarded_worker):
+        guarded_worker.set_reply({"ok": True, "results": [], "engine": "ddgs:auto"})
+        search_service.run(mode="search", query="windows mcp")
+        assert len(guarded_worker.calls) == 1

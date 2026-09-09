@@ -17,6 +17,10 @@ Design notes
 * **Output is budgeted.** Search results and page text are trimmed to a token
   budget with an explicit "raise max_chars" hint instead of silently flooding
   the context window.
+* **Fetch targets are SSRF-checked.** The tool this replaced ran every URL
+  through ``validate_url``; dropping that would have let an agent reach the
+  loopback interface or a metadata endpoint through the server's network
+  position.
 """
 
 from __future__ import annotations
@@ -29,15 +33,19 @@ import sys
 import tempfile
 from pathlib import Path
 
+from windows_mcp.infrastructure.security import validate_url
+
 SENTINEL = "__WMP_JSON__"
 WORKER_PATH = Path(__file__).with_name("worker.py")
 
 ENV_INTERPRETER = "WINDOWS_MCP_SEARCH_PYTHON"
 ENV_CLIENT_TIMEOUT = "WINDOWS_MCP_CLIENT_TIMEOUT"
+ENV_ALLOW_PRIVATE = "WINDOWS_MCP_SEARCH_ALLOW_PRIVATE"
 REQUIRED_MODULE = "ddgs"
 
 LIST_MODES = ("search", "news", "images", "videos")
 TEXT_MODES = ("read", "crawl")
+URL_MODES = ("read", "crawl", "select")
 MODES = LIST_MODES + TEXT_MODES + ("select", "env")
 
 DEFAULT_MAX_RESULTS = 8
@@ -424,6 +432,26 @@ def _format_env(reply: dict, notes: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _allow_private_targets() -> bool:
+    raw = str(os.environ.get(ENV_ALLOW_PRIVATE, "") or "").strip().casefold()
+    return raw in ("1", "true", "yes", "on", "enabled")
+
+
+def _validate_target(url: str) -> None:
+    """Refuse unsafe fetch targets before a worker process is spawned.
+
+    Blocks non-HTTP(S) schemes, credential-embedded URLs, and hosts that resolve
+    to private, loopback, link-local, multicast or reserved addresses. Without
+    this, SearchPro would be a way to read the host's own network - the tool it
+    replaced applied the same guard. Set ``WINDOWS_MCP_SEARCH_ALLOW_PRIVATE=1``
+    to scrape a local dev server on purpose.
+    """
+    try:
+        validate_url(url, allow_private=_allow_private_targets())
+    except ValueError as exc:
+        raise ValueError(f"refusing to fetch {url}: {exc}") from exc
+
+
 def run(
     *,
     mode: str = "search",
@@ -450,8 +478,10 @@ def run(
 
     if normalised in LIST_MODES and not (query or "").strip():
         raise ValueError(f"mode={normalised} requires query")
-    if normalised in ("read", "crawl", "select") and not (url or "").strip():
+    if normalised in URL_MODES and not (url or "").strip():
         raise ValueError(f"mode={normalised} requires url")
+    if normalised in URL_MODES:
+        _validate_target((url or "").strip())
 
     if timelimit and timelimit not in TIMELIMITS:
         raise ValueError(f"timelimit must be one of {', '.join(TIMELIMITS)}; got {timelimit!r}")
