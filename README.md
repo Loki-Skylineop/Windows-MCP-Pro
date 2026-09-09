@@ -7,9 +7,12 @@
   <img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%2010%E2%80%9311-blue" alt="Platform">
   <img src="https://img.shields.io/badge/tools-13-blue" alt="13 tools">
-  <img src="https://img.shields.io/badge/tests-813%20passing-brightgreen" alt="808 tests passing">
+  <img src="https://img.shields.io/badge/tests-813%20passing-brightgreen" alt="813 tests passing">
+  <img src="https://img.shields.io/badge/SearchPro-9%20modes-blueviolet" alt="SearchPro: 9 modes">
+  <img src="https://img.shields.io/badge/GUI%20tools-0-lightgrey" alt="Zero GUI tools">
 
   <p><b>A coding-agent fork of <a href="https://github.com/CursorTouch/Windows-MCP">CursorTouch/Windows-MCP</a> v0.8.5</b></p>
+  <p><i>Same Windows plumbing. A different job - and it does that job without burning your context window.</i></p>
 
 </div>
 
@@ -25,8 +28,37 @@ surgical file editor, a code searcher, a background job runner and a web researc
 stack - and deletes the GUI tools that were quietly eating the context window on
 every request.
 
+### Why you want this one instead
+
+Upstream is a fine project for the job it was built for: 2M+ installs of "let the
+model click things". Point that same toolset at real engineering work and the
+seams open immediately - a failing command that reports `Status Code: 0`, a
+`timeout=75` the client aborts at 60 s anyway, an outline tool that floods the
+context window and truncates the answer mid-sentence, and a `Scrape` tool whose
+default path depends on an MCP feature most clients never implemented. That is
+not incompetence; that is a UI-automation server being used as a coding backend.
+
+This fork treats every one of those as a bug with a test attached, not as a quirk
+to work around in the system prompt:
+
+- **18 commits** on top of the upstream base, each one shipped with a green suite.
+- **813 tests** - 654 test functions across 48 files, 7,038 lines of test code,
+  hermetic: no network, no live desktop, no flaky GUI.
+- **3,564 lines** of new service code (2,285 in the coding services, 1,279 in the
+  out-of-process web stack) instead of prompt-level workarounds.
+- **11 GUI tools deleted** - roughly 14,000 characters (~4k tokens) of schema
+  that was re-sent on *every single request* and never called.
+- Four coding tools added (`Edit`, `Grep`, `Job`, `Git`), `Scrape` replaced
+  outright, and every tool tagged `[coding]` / `[web]` / `[windows]` / `[util]`
+  so tool choice stops being guesswork.
+
+None of this came from reading upstream's source and guessing. Every failure mode
+below was hit in live use, reproduced, fixed, locked down by a test, and then
+written into the tool description the model actually reads.
+
 All upstream credit belongs to [CursorTouch](https://github.com/CursorTouch); this
-repository keeps the MIT license and tracks upstream as a remote.
+repository keeps the MIT license and tracks upstream as a remote. The
+disagreement here is about target workload, not about their engineering.
 
 ### What's different from upstream v0.8.5
 
@@ -39,11 +71,14 @@ repository keeps the MIT license and tracks upstream as a remote.
 | Version control | none | `Git`: `status` / `diff` / `log` / `commit` / `branch` / `info`, trimmed output |
 | Long commands | die at the request timeout | `Job`: `start` / `status` / `logs` / `stop` / `list` / `clean` |
 | Shell | unbounded timeout, raw CLIXML stderr | 55 s clamp + graceful stop, decoded stderr, persistent sessions |
-| Web | `Scrape` (one URL, via MCP sampling most clients don't implement) | `SearchPro`: metasearch + article extraction + CSS scraping + headless crawl |
+| Failure reporting | `Write-Error` could return `Status Code: 0` | real exit codes, `isError: true`, sanitised stderr |
+| Web | `Scrape` (one URL, via MCP sampling most clients don't implement) | `SearchPro`: 9 modes - metasearch, news, images, videos, books, article extraction, CSS scraping, headless crawl, diagnostics |
+| Hostile networks | one transport, one provider, silent failure | provider ladders, second transport, honest `engine=` label |
+| Schema cost per request | 23 schemas, GUI set included | ~4k tokens lighter |
 | GUI automation | 11 tools | removed on purpose |
-| Tests | 676 | **780** |
+| Tests | 676 | **813** |
 
-### Fixes made on top of upstream
+### Five upstream defects this fork fixes
 
 - **`Grep mode=outline` blew up the context.** It returned every symbol in the
   repository and truncated the model's answer mid-sentence. Now capped (default
@@ -60,24 +95,49 @@ repository keeps the MIT license and tracks upstream as a remote.
 - **BOM payloads.** Anything written by PowerShell's `Set-Content -Encoding UTF8`
   carries a BOM that `json.load` rejects - the SearchPro worker reads `utf-8-sig`.
 
+### Hardened after live use, not after reading the code
+
+- **`select` used to burn the whole deadline.** Scrapling got the full budget and
+  the call died at 45-55 s. It now gets one attempt on half the budget and falls
+  back to urllib: same page, `engine=urllib`, about 20 s instead of a timeout.
+- **Selector errors now teach.** `'h1, body=p'` used to fail with a bare parse
+  error; the message now states that selector pairs are separated by `;`, because
+  the comma belongs to CSS itself.
+- **`books` survives a blocked catalogue.** A network that kills TLS to
+  `openlibrary.org` (`UNEXPECTED_EOF_WHILE_READING` on urllib, `curl: (28)` on
+  curl_cffi) used to mean no answer at all. `books` now walks Open Library ->
+  Google Books -> plain web search, splits the budget half / quarter / rest, and
+  names the rung that answered - a web page is never dressed up as a catalogue
+  record.
+
 ### SearchPro in one paragraph
 
-One tool, eight modes, cheapest first: `search` (ddgs metasearch, ~1-4 s, no
-captcha) -> `read` (trafilatura, URL to markdown) -> `select` (scrapling + CSS) ->
-`crawl` (headless Chromium, only when the page needs JavaScript). It runs in a
-separate interpreter, so the crawler's dependency tree can never break the
-server, and a hung browser dies with a child process. Output is budgeted,
-timeouts are clamped, and captcha/block pages are reported as such instead of
-being passed off as content. Full documentation:
-[docs/search-pro.md](docs/search-pro.md).
+One tool, nine modes, cheapest first: `search` (ddgs metasearch over Brave,
+Yandex, DuckDuckGo, Bing and Yahoo, ~1-4 s, no captcha), `news` / `images` /
+`videos`, `books` (Open Library -> Google Books -> web fallback), `read`
+(trafilatura, URL to markdown, up to five URLs in one call), `select` (scrapling
++ CSS, with a urllib fallback), `crawl` (headless Chromium, only when the page
+needs JavaScript) and `env` (diagnostics). It runs in a separate interpreter, so
+the crawler's dependency tree can never break the server, and a hung browser dies
+with a child process. Output is budgeted, timeouts are clamped, fetches are
+cached for ten minutes, the answering engine is named in the header, and
+captcha/block pages are reported as such instead of being passed off as content.
+Full documentation: [docs/search-pro.md](docs/search-pro.md).
 
 ## Updates
 
+- `SearchPro mode=books` gained a provider ladder (Open Library -> Google Books ->
+  plain web search), so a blocked catalogue no longer means no answer.
+- `select` falls back to urllib when Scrapling is blocked or slow, and selector
+  syntax errors now explain the `;` versus `,` rule.
+- Every tool description is prefixed with `[coding]` / `[web]` / `[windows]` /
+  `[util]` plus a keyword line, so a model picks the right tool on the first try.
 - `SearchPro` replaces `Scrape`: metasearch, article extraction, CSS scraping and
   a headless crawler in one tool.
 - The 11 GUI-automation tools were removed; `Wait` was kept as a standalone tool.
-- Coding tools (`Edit`, `Grep`, `Job`, persistent `PowerShell` sessions) added and
-  hardened - see the fix list above.
+- Coding tools (`Edit`, `Grep`, `Job`, `Git`, persistent `PowerShell` sessions)
+  added and hardened - see the fix list above.
+- Suite at **813 tests**, still hermetic.
 
 ### Supported Operating Systems
 
@@ -132,8 +192,19 @@ SearchPro mode=crawl   url=https://example.com/spa  wait_for="css:.results"
   Scrapling, and drives a headless browser with Crawl4AI - all out of process,
   so those dependencies can never break the server.
 
-- **Tested**
-  The whole suite runs without a network connection or a live desktop.
+- **Tested like a product, not a demo**
+  813 tests, 654 test functions across 48 files, 7,038 lines of test code. The
+  whole suite runs without a network connection or a live desktop, so a green run
+  actually means something.
+
+- **Survives a hostile network**
+  Built and verified through a VPN that intermittently kills TLS to individual
+  hosts. `books` answers anyway, `select` degrades to a second transport instead
+  of timing out, and every reply names the engine that produced it.
+
+- **Honest failures**
+  Real exit codes, `isError: true` on real errors, decoded stderr, and error
+  messages that state the fix rather than the symptom.
 
 ## 🛠️Installation
 
