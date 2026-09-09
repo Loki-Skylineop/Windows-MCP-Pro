@@ -1,36 +1,82 @@
 <div align="center">
-  <h1>🪟 Windows-MCP</h1>
+  <h1>🪟 Windows-MCP Pro</h1>
 
-  <a href="https://github.com/CursorTouch/Windows-MCP/blob/main/LICENSE">
+  <a href="https://github.com/Loki-Skylineop/Windows-MCP-Pro/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
-  <img src="https://img.shields.io/badge/platform-Windows%207–11-blue" alt="Platform: Windows 7 to 11">
-  <img src="https://img.shields.io/github/last-commit/CursorTouch/Windows-MCP" alt="Last Commit">
-  <a href="https://pepy.tech/projects/windows-mcp">
-    <img src="https://static.pepy.tech/personalized-badge/windows-mcp?period=total&amp;units=INTERNATIONAL_SYSTEM&amp;left_color=BLACK&amp;right_color=GREEN&amp;left_text=downloads" alt="PyPI Downloads">
-  </a>
-  <br>
-  <a href="https://x.com/CursorTouch">
-    <img src="https://img.shields.io/badge/follow-%40CursorTouch-1DA1F2?logo=twitter&style=flat" alt="Follow on Twitter">
-  </a>
-  <a href="https://discord.com/invite/Aue9Yj2VzS">
-    <img src="https://img.shields.io/badge/Join%20on-Discord-5865F2?logo=discord&logoColor=white&style=flat" alt="Join us on Discord">
-  </a>
+  <img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%E2%80%9311-blue" alt="Platform">
+  <img src="https://img.shields.io/badge/tools-12-blue" alt="12 tools">
+  <img src="https://img.shields.io/badge/tests-701%20passing-brightgreen" alt="701 tests passing">
 
-  <a href="https://trendshift.io/repositories/20935?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-20935" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/20935/daily?language=Python" alt="CursorTouch%2FWindows-MCP | Trendshift" width="250" height="55"/></a>
+  <p><b>A coding-agent fork of <a href="https://github.com/CursorTouch/Windows-MCP">CursorTouch/Windows-MCP</a> v0.8.5</b></p>
 
 </div>
 
-**Windows-MCP** is a lightweight, open-source project that enables seamless integration between AI agents and the Windows operating system. Acting as an MCP server bridges the gap between LLMs and the Windows operating system, allowing agents to perform tasks such as **file navigation, application control, UI interaction, QA testing,** and more.
+## What this fork is
 
-mcp-name: io.github.CursorTouch/Windows-MCP
+**Windows-MCP Pro** is a downstream fork of
+[CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) **v0.8.5**
+(upstream base commit `08ddee7`), retargeted from *desktop/UI automation* to
+*agentic software engineering on Windows*.
+
+Upstream hands an LLM a mouse and a keyboard. This fork hands it a shell, a
+surgical file editor, a code searcher, a background job runner and a web research
+stack - and deletes the GUI tools that were quietly eating the context window on
+every request.
+
+All upstream credit belongs to [CursorTouch](https://github.com/CursorTouch); this
+repository keeps the MIT license and tracks upstream as a remote.
+
+### What's different from upstream v0.8.5
+
+| | Upstream v0.8.5 | Windows-MCP Pro |
+| --- | --- | --- |
+| Tools exposed | 23 | **12** |
+| Target workload | click / type / screenshot | shell, files, code search, web |
+| File editing | `FileSystem write` (whole file) | `Edit` with 10 modes, backups, `expected_sha256`, `dry_run`, unified `patch` |
+| Code search | none | `Grep`: `grep` / `map` / `outline`, capped output |
+| Long commands | die at the request timeout | `Job`: `start` / `status` / `logs` / `stop` / `list` / `clean` |
+| Shell | unbounded timeout, raw CLIXML stderr | 55 s clamp + graceful stop, decoded stderr, persistent sessions |
+| Web | `Scrape` (one URL, via MCP sampling most clients don't implement) | `SearchPro`: metasearch + article extraction + CSS scraping + headless crawl |
+| GUI automation | 11 tools | removed on purpose |
+| Tests | 676 | **701** |
+
+### Fixes made on top of upstream
+
+- **`Grep mode=outline` blew up the context.** It returned every symbol in the
+  repository and truncated the model's answer mid-sentence. Now capped (default
+  100 symbols, hard max 2000) with an explicit "narrow the pattern" hint.
+- **`PowerShell` accepted timeouts it could not honour.** `timeout=75` was
+  accepted, then the MCP client aborted the call at ~60 s and the output was lost.
+  Now clamped to 55 s (`WINDOWS_MCP_CLIENT_TIMEOUT`) with a note pointing at `Job`.
+- **`Write-Error` reported success.** A failing command returned `Status Code: 0`
+  and leaked raw `#< CLIXML` payloads plus the internal exit-code probe into the
+  answer. stderr is now decoded to plain text and sanitised.
+- **`Scrape` was a trap.** Its default path asked the client to summarise the page
+  through MCP sampling; clients that don't implement sampling (Notion among them)
+  got raw HTML noise. Replaced by `SearchPro`.
+- **BOM payloads.** Anything written by PowerShell's `Set-Content -Encoding UTF8`
+  carries a BOM that `json.load` rejects - the SearchPro worker reads `utf-8-sig`.
+
+### SearchPro in one paragraph
+
+One tool, eight modes, cheapest first: `search` (ddgs metasearch, ~1-4 s, no
+captcha) -> `read` (trafilatura, URL to markdown) -> `select` (scrapling + CSS) ->
+`crawl` (headless Chromium, only when the page needs JavaScript). It runs in a
+separate interpreter, so the crawler's dependency tree can never break the
+server, and a hung browser dies with a child process. Output is budgeted,
+timeouts are clamped, and captcha/block pages are reported as such instead of
+being passed off as content. Full documentation:
+[docs/search-pro.md](docs/search-pro.md).
 
 ## Updates
-- Windows-MCP reached `2M+ Users` in [Claude Desktop Extensiosn](https://claude.ai/directory). 
-- Try out [🪟Windows-Use](https://pypi.org/project/windows-use/), an agent built using Windows-MCP.
-- Windows-MCP is now available on [PyPI](https://pypi.org/project/windows-mcp/) (thus supports `uvx windows-mcp`)
-- Windows-MCP is added to [MCP Registry](https://github.com/modelcontextprotocol/registry)
+
+- `SearchPro` replaces `Scrape`: metasearch, article extraction, CSS scraping and
+  a headless crawler in one tool.
+- The 11 GUI-automation tools were removed; `Wait` was kept as a standalone tool.
+- Coding tools (`Edit`, `Grep`, `Job`, persistent `PowerShell` sessions) added and
+  hardened - see the fix list above.
 
 ### Supported Operating Systems
 
@@ -707,31 +753,62 @@ Remote (with auth + IP allowlist + TLS):
 
 ## 🔨MCP Tools
 
-MCP Client can access the following tools to interact with Windows:
+Windows-MCP Pro exposes **12 tools**. Every tool schema is re-sent to the model on
+*every* request, so the tool list is a context budget, not a feature list - the
+upstream GUI set was removed for exactly that reason (see
+[Why 12 tools](#why-12-tools)).
 
-- `Click`: Click on the screen at the given coordinates.
-- `Type`: Type text on an element (optionally clears existing text).
-- `Scroll`: Scroll vertically or horizontally on the window or specific regions.
-- `Move`: Move mouse pointer or drag (set drag=True) to coordinates. For deterministic
-  drag, set `from_loc=[x, y]` with `drag=True` to press at an explicit start point and
-  release at `loc` in one tool call. Optional `duration` adds bounded intermediate
-  movement.
-- `Shortcut`: Press keyboard shortcuts (`Ctrl+c`, `Alt+Tab`, etc).
-- `Wait`: Pause for a defined duration.
-- `WaitFor`: Wait until text, an active window, an element, or a focused element appears by polling UI state inside one tool call.
-- `DisplayInventory`: Read display layout, work areas, effective DPI, and scale metadata.
-- `Screenshot`: Fast screenshot-first desktop capture with cursor position, active/open windows, and an image. Skips UI tree extraction for speed and should be the default first call when you mainly need visual context. Supports `display=[0]` or `display=[0,1]` using zero-based active Windows display indices, and `region=[left, top, right, bottom]` (virtual-desktop pixel coordinates) to capture just that rectangle instead of the whole screen — cheaper on tokens when you already know which area matters. `region` takes precedence over `display` when both are given; an invalid or out-of-bounds region raises an error. After capture, a brief orange-red glowing border is drawn inside the captured area as a visual confirmation (set `WINDOWS_MCP_DISABLE_FLASH=1` to disable).
-- `Snapshot`: Full desktop state capture for workflows that need interactive element ids, scrollable regions, or `use_dom=True` browser extraction. Supports `use_vision=True` for including screenshots, `display=[0]` or `display=[0,1]` using zero-based active Windows display indices, and `region=[left, top, right, bottom]` (virtual-desktop pixel coordinates) to inspect just that rectangle instead of the whole screen; `region` takes precedence over `display` when both are given, and an invalid or out-of-bounds region raises an error.
-- `App`: Launch an application by Start Menu name or strictly by executable path with separated argv and optional cwd; resize, move, and switch between windows.
-- `PowerShell`: To execute PowerShell commands.
-- `FileSystem`: Read, write, copy, move, delete, list, search, and inspect files and directories.
-- `Scrape`: To scrape the entire webpage for information.
-- `MultiSelect`: Select multiple items (files, folders, checkboxes) with optional Ctrl key. Uses bulk label-to-coordinate resolution when labels are provided.
-- `MultiEdit`: Enter text into multiple input fields at specified coordinates. Uses bulk label-to-coordinate resolution when labels are provided.
-- `Clipboard`: Read or set Windows clipboard content.
+### Coding
+
+- `PowerShell`: Execute PowerShell with a graceful timeout (clamped to 55 s so the
+  MCP client can never time out first), CLIXML-decoded stderr, real exit codes,
+  optional persistent `session` and `cwd`.
+- `Edit`: Surgical file editing - `replace`, `regex`, `lines`, `delete_lines`,
+  `insert_after`, `insert_before`, `append`, `prepend`, `create`, `patch`; plus
+  `dry_run`, automatic backups, `expected_sha256` optimistic locking, and a `view`
+  mode with line numbers. Preserves each file's encoding and line endings.
+- `Grep`: Code search in three shapes - `grep` (ripgrep-style with context),
+  `map` (repository tree with sizes) and `outline` (symbols per file). Results are
+  capped so a wide pattern cannot flood the context window.
+- `Job`: Run long commands in the background and poll them - `start`, `status`,
+  `logs` (with `tail`/`head`/`pattern`), `stop`, `list`, `clean`. This is how test
+  suites, builds and installs run without hitting the request timeout.
+- `FileSystem`: Read, write, copy, move, delete, list, search and inspect files
+  and directories.
+
+### Web
+
+- `SearchPro`: Web search and page extraction in one tool - `search`, `news`,
+  `images`, `videos` (ddgs metasearch over brave/yandex/duckduckgo/bing/yahoo),
+  `read` (URL to clean markdown), `select` (CSS selectors to records), `crawl`
+  (headless Chromium with `wait_for`/`js`/`scroll`/`focus`) and `env`
+  (diagnostics). Runs out of process on the interpreter that owns the scraping
+  stack. See [docs/search-pro.md](docs/search-pro.md).
+
+### Windows
+
+- `App`: Launch an application by Start Menu name or strictly by executable path
+  with separated argv and optional cwd; resize, move, and switch between windows.
 - `Process`: List running processes or terminate them by PID or name.
-- `Notification`: Send a Windows toast notification with a title and message.
 - `Registry`: Read, write, delete, or list Windows Registry values and keys.
+- `Clipboard`: Read or set Windows clipboard content.
+- `Notification`: Send a Windows toast notification with a title and message.
+- `Wait`: Pause for a defined duration (clamped to 45 s) - useful when something
+  outside the agent's control needs a moment to settle.
+
+### Why 12 tools
+
+These eleven upstream tools are **not** in this fork: `Snapshot`, `Screenshot`,
+`Click`, `Type`, `Scroll`, `Move`, `Shortcut`, `MultiSelect`, `MultiEdit`,
+`DisplayInventory`, `WaitFor`. Together their schemas cost roughly 14,000
+characters (~4k tokens) of context on every request, and a coding agent never
+calls them: it edits files and runs commands instead of clicking pixels. If you
+want desktop/UI automation, use
+[upstream Windows-MCP](https://github.com/CursorTouch/Windows-MCP) - this fork is
+deliberately the other half of the problem.
+
+`--tools` / `--exclude-tools` still work, so you can narrow the 12 further per
+client.
 
 
 ## 🤝 Connect with Us

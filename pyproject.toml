@@ -46,9 +46,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/CursorTouch"
-Repository = "https://github.com/CursorTouch/Windows-MCP"
-Issues = "https://github.com/CursorTouch/Windows-MCP/issues"
+Homepage = "https://github.com/Loki-Skylineop/Windows-MCP-Pro"
+Repository = "https://github.com/Loki-Skylineop/Windows-MCP-Pro"
+Issues = "https://github.com/Loki-Skylineop/Windows-MCP-Pro/issues"
+Upstream = "https://github.com/CursorTouch/Windows-MCP"
 
 [project.scripts]
 windows-mcp = "windows_mcp.__main__:main"

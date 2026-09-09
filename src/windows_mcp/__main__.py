@@ -279,18 +279,6 @@ def _build_mcp() -> FastMCP:
     return _mcp
 
 
-def __getattr__(name: str):
-    if name in {"state_tool", "screenshot_tool"}:
-        _build_mcp()
-        from windows_mcp.tools import snapshot
-
-        tool = getattr(snapshot, name)
-        if tool is None:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-        return getattr(tool, "fn", tool)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 class Transport(Enum):
     STDIO = "stdio"
     SSE = "sse"

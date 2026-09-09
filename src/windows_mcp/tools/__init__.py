@@ -1,37 +1,39 @@
-"""tools subpackage — registers all MCP tool definitions on a FastMCP instance."""
+"""tools subpackage — registers all MCP tool definitions on a FastMCP instance.
+
+Windows-MCP Pro deliberately ships a small tool surface: every tool description
+is sent to the model on every single request, so a tool that is never called is
+pure context tax. The GUI automation set (Snapshot, Screenshot, Click, Type,
+Scroll, Move, Shortcut, MultiSelect, MultiEdit, DisplayInventory, WaitFor) was
+removed; the desktop layer that powered it is still in the package for anyone who
+wants to re-register those tools in a fork.
+"""
 
 from windows_mcp.tools import (
     app,
     clipboard,
-    display,
     edit,
     filesystem,
     grep,
-    input,
     jobs,
-    multi,
     notification,
     process,
     registry,
-    scrape,
+    search,
     shell,
-    snapshot,
+    wait,
 )
 
 _MODULES = [
-    app,
-    display,
     shell,
-    filesystem,
+    jobs,
     edit,
     grep,
-    jobs,
-    snapshot,
-    input,
-    scrape,
-    multi,
-    clipboard,
+    filesystem,
+    search,
+    app,
     process,
+    clipboard,
+    wait,
     notification,
     registry,
 ]
